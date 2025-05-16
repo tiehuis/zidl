@@ -1,0 +1,32 @@
+typedef struct IKEEXT_CERTIFICATE_AUTHENTICATION0_ {
+  IKEEXT_CERT_CONFIG_TYPE inboundConfigType;
+  [switch_type(IKEEXT_CERT_CONFIG_TYPE), switch_is(inboundConfigType)]
+  union {
+    [case(IKEEXT_CERT_CONFIG_EXPLICIT_TRUST_LIST)]
+    struct {
+      UINT32 inboundRootArraySize;
+      [size_is(inboundRootArraySize), unique]
+      IKEEXT_CERT_ROOT_CONFIG0 *inboundRootArray;
+    };
+    [case(IKEEXT_CERT_CONFIG_ENTERPRISE_STORE)]
+    [unique] IKEEXT_CERT_ROOT_CONFIG0 *inboundEnterpriseStoreConfig;
+    [case(IKEEXT_CERT_CONFIG_TRUSTED_ROOT_STORE)]
+    [unique] IKEEXT_CERT_ROOT_CONFIG0 *inboundTrustedRootStoreConfig;
+  };
+  IKEEXT_CERT_CONFIG_TYPE outboundConfigType;
+  [switch_type(IKEEXT_CERT_CONFIG_TYPE), switch_is(outboundConfigType)]
+  union {
+    [case(IKEEXT_CERT_CONFIG_EXPLICIT_TRUST_LIST)]
+    struct {
+      UINT32 outboundRootArraySize;
+      [size_is(outboundRootArraySize), unique]
+      IKEEXT_CERT_ROOT_CONFIG0 *outboundRootArray;
+    };
+    [case(IKEEXT_CERT_CONFIG_ENTERPRISE_STORE)]
+    [unique] IKEEXT_CERT_ROOT_CONFIG0 *outboundEnterpriseStoreConfig;
+    [case(IKEEXT_CERT_CONFIG_TRUSTED_ROOT_STORE)]
+    [unique] IKEEXT_CERT_ROOT_CONFIG0 *outboundTrustedRootStoreConfig;
+  };
+  UINT32 flags;
+} IKEEXT_CERTIFICATE_AUTHENTICATION0;
+cpp_quote("")

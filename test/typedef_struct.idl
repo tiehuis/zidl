@@ -1,0 +1,44 @@
+typedef struct FWP_VALUE0_ {
+    FWP_DATA_TYPE type;
+    [switch_type(FWP_DATA_TYPE), switch_is(type)]
+    union {
+      [case(FWP_EMPTY)]
+        ;
+      [case(FWP_UINT8)]
+        UINT8 uint8;
+      [case(FWP_UINT16)]
+        UINT16 uint16;
+      [case(FWP_UINT32)]
+        UINT32 uint32;
+      [case(FWP_UINT64)]
+        [unique] UINT64 *uint64;
+      [case(FWP_INT8)]
+        INT8 int8;
+      [case(FWP_INT16)]
+        INT16 int16;
+      [case(FWP_INT32)]
+        INT32 int32;
+      [case(FWP_INT64)]
+        [unique] INT64 *int64;
+      [case(FWP_FLOAT)]
+        float float32;
+      [case(FWP_DOUBLE)]
+        [unique] double *double64;
+      [case(FWP_BYTE_ARRAY16_TYPE)]
+        [unique] FWP_BYTE_ARRAY16 *byteArray16;
+      [case(FWP_BYTE_BLOB_TYPE)]
+        [unique] FWP_BYTE_BLOB *byteBlob;
+      [case(FWP_SID)]
+        [unique] SID *sid;
+      [case(FWP_SECURITY_DESCRIPTOR_TYPE)]
+        [unique] FWP_BYTE_BLOB *sd;
+      [case(FWP_TOKEN_INFORMATION_TYPE)]
+        [unique] FWP_TOKEN_INFORMATION *tokenInformation;
+      [case(FWP_TOKEN_ACCESS_INFORMATION_TYPE)]
+        [unique] FWP_BYTE_BLOB *tokenAccessInformation;
+      [case(FWP_UNICODE_STRING_TYPE)]
+        [string] LPWSTR unicodeString;
+      [case(FWP_BYTE_ARRAY6_TYPE)]
+        [unique] FWP_BYTE_ARRAY6 *byteArray6;
+    };
+  } FWP_VALUE0;

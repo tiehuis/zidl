@@ -1,0 +1,4 @@
+[local, object, uuid (eb0cb9e8-7996-11d2-872e-0000f8080859),]
+interface IReleaseMarshalBuffers {
+  HRESULT Call (void);
+}

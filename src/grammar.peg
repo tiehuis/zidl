@@ -1,0 +1,995 @@
+Root <- skip (GlobalStatements / AcfStatements) eof
+
+GlobalStatements <- GlobalStatement*
+GlobalStatement
+    <- NamespaceDef LBRACE GlobalStatements RBRACE
+     / InterfaceDef
+     / Interface SEMICOLON
+     / DispInterfaceDef
+     / DispInterface
+     / DelegateDef
+     / CoClassDef
+     / CoClass SEMICOLON
+     / ApiContractDef
+     / ApiContract SEMICOLON
+     / RuntimeClassDef
+     / RuntimeClass SEMICOLON
+     / ModuleDef
+     / LibraryDef
+     / Statement
+     / DeclBlock
+
+ImportStatements <- ImportStatement*
+ImportStatement
+    <- NamespaceDef LBRACE ImportStatements RBRACE
+     / InterfaceDef
+     / Interface SEMICOLON
+     / DispInterfaceDef
+     / DispInterface
+     / DelegateDef
+     / CoClassDef
+     / CoClass SEMICOLON
+     / ApiContractDef
+     / ApiContract SEMICOLON
+     / RuntimeClassDef
+     / RuntimeClass SEMICOLON
+     / ModuleDef
+     / LibraryDef
+     / Statement
+     / ImportLib
+     / ImportDeclBlock
+
+ImportDeclBlock <- KEYWORD_declare LBRACE ImportDeclStatements RBRACE
+ImportDeclStatements <- ImportDeclStatement*
+ImportDeclStatement <- KEYWORD_interface QualifiedType LARROW ParameterizedTypeArgs RARROW SEMICOLON
+
+DeclBlock <- KEYWORD_declare LBRACE DeclStatements RBRACE
+DeclStatements <- DeclStatement*
+DeclStatement <- KEYWORD_interface QualifiedType LARROW ParameterizedTypeArgs RARROW SEMICOLON
+
+IntStatements <- Statement*
+
+Statement
+    <- CppQuote
+     / TypeDecl SEMICOLON
+     / Declaration SEMICOLON
+     / Import
+     / TypeDef SEMICOLON
+     / Pragma
+     / PragmaWarning
+
+Pragma <- '#pragma' end_of_word IDENTIFIER
+PragmaWarning <- 'midl_pragma' end_of_word 'warning' end_of_word LPAREN (IDENTIFIER / KEYWORD_default) COLON Warnings RPAREN
+
+Warnings <- INTEGER+
+
+TypeDecl
+    <- Attributes? EnumDef
+     / KEYWORD_enum IDENTIFIER
+     / Attributes? StructDef
+     / KEYWORD_struct IDENTIFIER
+     / Attributes? UnionDef
+     / KEYWORD_union IDENTIFIER
+
+CppQuote <- KEYWORD_cpp_quote LPAREN STRINGLITERAL RPAREN
+
+ImportLib <- KEYWORD_importlib LPAREN STRINGLITERAL RPAREN SEMICOLON?
+ImportStart <- KEYWORD_import STRINGLITERAL SEMICOLON
+Import <- ImportStart ImportStatements
+
+LibraryHeader <- KEYWORD_library IDENTIFIER
+
+LibraryDef <- Attributes? LibraryHeader LBRACE ImportStatements RBRACE SEMICOLON?
+
+ArgList <- Arg (COMMA Arg)*
+Args <- ArgList / ArgList COMMA ELLIPSIS
+Arg <- Attributes? DeclSpec AnyDeclarator?
+
+Array <- LBRACKET (Expr / ASTERISK)? RBRACKET
+
+Attributes <- AttributeBlock+
+AttributeBlock <- LBRACKET AttributeList RBRACKET
+AttributeList <- Attribute (COMMA Attribute?)*
+
+StringList <- STRINGLITERAL (COMMA STRINGLITERAL)*
+
+ContractVersion
+    <- INTEGER
+     / INTEGER DOT INTEGER
+
+ContractReq <- DeclSpec COMMA ContractVersion
+StaticAttr <- DeclSpec COMMA ContractReq
+ActivatableAttr
+    <- DeclSpec COMMA ContractReq
+     / ContractReq
+AccessAttr <- KEYWORD_ATTR_public / KEYWORD_protected
+ComposableAttr <- DeclSpec COMMA AccessAttr COMMA ContractReq
+DeprecatedAttr <- STRINGLITERAL COMMA IDENTIFIER COMMA ContractReq
+
+Attribute
+    <- KEYWORD_ATTR_activatable LPAREN ActivatableAttr RPAREN
+     / KEYWORD_ATTR_aggretable
+     / KEYWORD_ATTR_annotation LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_appobject
+     / KEYWORD_ATTR_async
+     / KEYWORD_ATTR_autohandle
+     / KEYWORD_ATTR_bindable
+     / KEYWORD_ATTR_broadcast
+     / KEYWORD_ATTR_call_as LPAREN IDENTIFIER RPAREN
+     / KEYWORD_ATTR_case LPAREN ExprListIntConst RPAREN
+     / KEYWORD_ATTR_code
+     / KEYWORD_ATTR_composable LPAREN ComposableAttr RPAREN
+     / KEYWORD_ATTR_comm_status
+     / KEYWORD_ATTR_context_handle
+     / KEYWORD_ATTR_context_handle_noserialize
+     / KEYWORD_ATTR_context_handle_serialize
+     / KEYWORD_ATTR_contract LPAREN ContractReq RPAREN
+     / KEYWORD_ATTR_contract_version LPAREN ContractVersion RPAREN
+     / KEYWORD_ATTR_control
+     / KEYWORD_ATTR_custom LPAREN Uuid COMMA ExprConst RPAREN
+     / KEYWORD_ATTR_decode
+     / KEYWORD_ATTR_default
+     / KEYWORD_ATTR_defaultbind
+     / KEYWORD_ATTR_defaultcollelem
+     / KEYWORD_ATTR_defaultvalue LPAREN ExprConst RPAREN
+     / KEYWORD_ATTR_defaultvtable
+     / KEYWORD_ATTR_deprecated LPAREN DeprecatedAttr RPAREN
+     / KEYWORD_ATTR_disable_consistency_check
+     / KEYWORD_ATTR_displaybind
+     / KEYWORD_ATTR_dllname LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_dual
+     / KEYWORD_ATTR_enable_allocate
+     / KEYWORD_ATTR_encode
+     / KEYWORD_ATTR_endpoint LPAREN StringList RPAREN
+     / KEYWORD_ATTR_entry LPAREN ExprConst RPAREN
+     / KEYWORD_ATTR_event_add
+     / KEYWORD_ATTR_event_remove
+     / KEYWORD_ATTR_exclusive_to LPAREN DeclSpec RPAREN
+     / KEYWORD_ATTR_explicit_handle
+     / KEYWORD_ATTR_fault_status
+     / KEYWORD_ATTR_force_allocate
+     / KEYWORD_ATTR_handle
+     / KEYWORD_ATTR_helpcontext LPAREN ExprIntConst RPAREN
+     / KEYWORD_ATTR_helpfile LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_helpstring LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_helpstringcontext LPAREN ExprIntConst RPAREN
+     / KEYWORD_ATTR_helpstringdll LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_hidden
+     / KEYWORD_ATTR_id LPAREN ExprIntConst RPAREN
+     / KEYWORD_ATTR_idempotent
+     / KEYWORD_ATTR_ignore
+     / KEYWORD_ATTR_iid_is LPAREN Expr RPAREN
+     / KEYWORD_ATTR_immediatebind
+     / KEYWORD_ATTR_implicit_handle LPAREN Arg RPAREN
+     / KEYWORD_ATTR_in
+     / KEYWORD_ATTR_input_sync
+     / KEYWORD_ATTR_length_is LPAREN Exprs? RPAREN
+     / KEYWORD_ATTR_lcid (LPAREN ExprIntConst RPAREN)?
+     / KEYWORD_ATTR_licensed
+     / KEYWORD_ATTR_local
+     / KEYWORD_ATTR_marshaling_behavior LPAREN MarshalingBehavior RPAREN
+     / KEYWORD_ATTR_maybe
+     / KEYWORD_ATTR_message
+     / KEYWORD_ATTR_nocode
+     / KEYWORD_ATTR_nonbrowsable
+     / KEYWORD_ATTR_noncreatable
+     / KEYWORD_ATTR_nonextensible
+     / KEYWORD_ATTR_notify
+     / KEYWORD_ATTR_notify_flag
+     / KEYWORD_ATTR_object
+     / KEYWORD_ATTR_odl
+     / KEYWORD_ATTR_oleautomation
+     / KEYWORD_ATTR_optimize LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_optional
+     / KEYWORD_ATTR_out
+     / KEYWORD_ATTR_partial_ignore
+     / KEYWORD_ATTR_pointer_default LPAREN PointerType RPAREN
+     / KEYWORD_ATTR_progid LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_propget
+     / KEYWORD_ATTR_propput
+     / KEYWORD_ATTR_propputref
+     / KEYWORD_ATTR_proxy
+     / KEYWORD_ATTR_public
+     / KEYWORD_ATTR_range LPAREN ExprIntConst COMMA ExprIntConst RPAREN
+     / KEYWORD_ATTR_readonly
+     / KEYWORD_ATTR_represent_as LPAREN Type RPAREN
+     / KEYWORD_ATTR_requestedit
+     / KEYWORD_ATTR_restricted
+     / KEYWORD_ATTR_retval
+     / KEYWORD_ATTR_size_is LPAREN Exprs? RPAREN
+     / KEYWORD_ATTR_source
+     / KEYWORD_ATTR_static LPAREN StaticAttr RPAREN
+     / KEYWORD_ATTR_strict_context_handle
+     / KEYWORD_ATTR_string
+     / KEYWORD_ATTR_switch_is LPAREN Expr RPAREN
+     / KEYWORD_ATTR_switch_type LPAREN Type RPAREN
+     / KEYWORD_ATTR_transmit_as LPAREN Type RPAREN
+     / KEYWORD_ATTR_threading LPAREN ThreadingType RPAREN
+     / KEYWORD_ATTR_uidefault
+     / KEYWORD_ATTR_usesgetlasterror
+     / KEYWORD_ATTR_user_marshal LPAREN Type RPAREN
+     / KEYWORD_ATTR_uuid LPAREN Uuid RPAREN
+     / KEYWORD_ATTR_asyncuuid LPAREN Uuid RPAREN
+     / KEYWORD_ATTR_v1_enum
+     / KEYWORD_ATTR_vararg
+     / KEYWORD_ATTR_version LPAREN Version RPAREN
+     / KEYWORD_ATTR_viprogid LPAREN STRINGLITERAL RPAREN
+     / KEYWORD_ATTR_wire_marshal LPAREN Type RPAREN
+     / PointerType
+
+Uuid <- STRINGLITERAL / UUID
+
+CallConv
+    <- KEYWORD___cdecl / KEYWORD__cdecl / KEYWORD_cdecl
+     / KEYWORD___fastcall / KEYWORD__fastcall
+     / KEYWORD___pascal / KEYWORD__pascal / KEYWORD_pascal
+     / KEYWORD___stdcall / KEYWORD__stdcall / KEYWORD_stdcall
+
+Cases <- Case*
+Case
+    <- KEYWORD_case ExprIntConst COLON UnionField
+     / KEYWORD_default COLON UnionField
+
+Enums <- EnumList (COMMA EnumList)*
+EnumList <- Enum (COMMA Enum)*
+
+EnumMember <- Attributes? IDENTIFIER
+
+Enum <- EnumMember (EQUAL ExprIntConst)?
+EnumDef <- KEYWORD_enum IDENTIFIER? LBRACE Enums RBRACE
+
+Exprs <- Expr (COMMA Expr)*
+
+Expr <- ExprTernary
+ExprTernary <- ExprLogicalOr (QUESTIONMARK ExprTernary COLON ExprTernary)?
+ExprLogicalOr <- ExprLogicalAnd (PIPE2 ExprLogicalOr)*
+ExprLogicalAnd <- ExprOr (AMPERSAND2 ExprLogicalAnd)*
+ExprOr <- ExprXor (PIPE ExprOr)*
+ExprXor <- ExprAnd (CARET ExprXor)*
+ExprAnd <- ExprEquality (AMPERSAND ExprAnd)*
+ExprEquality <- ExprCompare ((EQUAL2 / EXCLAMATIONMARKEQUAL) ExprCompare)*
+ExprCompare <- ExprShift ((LARROW / RARROW / RARROWEQUAL / LARROWEQUAL) ExprShift)*
+ExprShift <- ExprAdd ((LARROW2 / RARROW2) ExprShift)*
+ExprAdd <- ExprMult ((PLUS / MINUS) ExprAdd)*
+ExprMult <- ExprUnaryPrefix ((ASTERISK / SLASH / PERCENT) ExprMult)*
+ExprUnaryPrefix
+    <- (PLUS / MINUS / EXCLAMATIONMARK / TILDE / PLUS2 / MINUS2 / AMPERSAND / ASTERISK) ExprUnaryPrefix
+     / KEYWORD_sizeof LPAREN UnqualifiedDeclSpec AbstractDeclarator? RPAREN
+     / LPAREN UnqualifiedDeclSpec AbstractDeclarator? RPAREN ExprUnaryPostfix
+     / ExprUnaryPostfix
+ExprUnaryPostfix <- ExprPrimary ExprPostfix*
+ExprPostfix
+    <- (LBRACKET Expr RBRACKET)
+     / (DOT IDENTIFIER)
+     / (MEMBERPTR IDENTIFIER)
+     / (PLUS2)
+     / (MINUS2)
+ExprPrimary
+    <- INTEGER
+     / FLOAT
+     / KEYWORD_FALSE
+     / KEYWORD_TRUE
+     / KEYWORD_NULL
+     / STRINGLITERAL
+     / WSTRINGLITERAL
+     / SQSTRINGLITERAL
+     / IDENTIFIER
+     / LPAREN Expr RPAREN
+
+ExprListIntConst <- ExprIntConst (COMMA ExprIntConst)*
+ExprIntConst <- Expr
+ExprConst <- Expr
+
+Fields <- Field*
+Field
+    <- Attributes? DeclSpec StructDeclaratorList SEMICOLON
+     / Attributes? UnionDef SEMICOLON
+
+NeUnionFields <- NeUnionField*
+NeUnionField <- (SField / Attributes?) SEMICOLON
+
+UnionField <- SField? SEMICOLON
+SField
+    <- Attributes? DeclSpec Declarator
+     / Attributes? StructDef
+
+FuncDef <- Declaration
+Declaration <- Attributes? DeclSpec InitDeclarator
+TypeName <- IDENTIFIER / KnownType
+Ident <- TypeName
+KnownType <- IDENTIFIER
+
+BaseType
+    <- KEYWORD_byte
+     / 'wchar'
+     / IntStd
+     / KEYWORD_signed IntStd
+     / KEYWORD_unsigned IntStd?
+     / KEYWORD_float
+     / KEYWORD_double
+     / KEYWORD_boolean
+     / 'error_status_t'
+     / KEYWORD_handle_t
+
+IntStd
+    <- KEYWORD_int
+     / KEYWORD_short KEYWORD_int?
+     / KEYWORD_small
+     / KEYWORD_long KEYWORD_int?
+     / KEYWORD_hyper KEYWORD_int?
+     / KEYWORD___int64
+     / KEYWORD_char
+     / KEYWORD___int32
+     / KEYWORD___int3264
+
+QualifiedType <- NamespacePfx? TypeName
+NamespacePfx <- IDENTIFIER DOT (IDENTIFIER DOT)*
+
+ParameterizedType <- QualifiedType LARROW ParameterizedTypeArgs RARROW
+ParameterizedTypeArgs
+    <- ParameterizedTypeArg (COMMA ParameterizedTypeArg)*
+ParameterizedTypeArg
+    <- ParameterizedType ASTERISK?
+     / QualifiedType ASTERISK?
+     / BaseType
+
+CoClass <- KEYWORD_coclass TypeName
+CoClassDef <- Attributes? CoClass LBRACE ClassInts RBRACE SEMICOLON?
+
+RuntimeClass <- KEYWORD_runtimeclass TypeName
+# TODO: ClassInts should be a list of declarations, getters/setters/constructor etc
+RuntimeClassDef <- Attributes? RuntimeClass Inherit? LBRACE ClassInts RBRACE SEMICOLON?
+
+ApiContract <- KEYWORD_apicontract TypeName
+ApiContractDef <- Attributes? ApiContract LBRACE RBRACE SEMICOLON?
+
+NamespaceDef <- KEYWORD_namespace IDENTIFIER (DOT IDENTIFIER)*
+
+ClassInts <- ClassInt*
+ClassInt <- Attributes? (InterfaceRef / DispInterfaceRef) SEMICOLON
+
+DispIntProps <- KEYWORD_properties COLON (SField SEMICOLON)*
+DispIntMethods <- KEYWORD_methods COLON (FuncDef SEMICOLON)*
+
+DispInterface <- KEYWORD_dispinterface TypeName
+DispInterfaceDef
+    <- Attributes? DispInterface LBRACE DispIntProps DispIntMethods RBRACE SEMICOLON?
+     / Attributes? DispInterface LBRACE Interface SEMICOLON RBRACE SEMICOLON?
+DispInterfaceRef <- KEYWORD_dispinterface TypeName
+
+# TODO: Multiple inheritence
+Inherit <- COLON (ParameterizedType / QualifiedType)
+
+TypeParameter <- TypeName
+TypeParameters <- TypeParameter (COMMA TypeParameter)*
+
+Interface <- KEYWORD_interface TypeName (LARROW TypeParameters RARROW)?
+InterfaceDef
+    <- Attributes? Interface Inherit? Requires? LBRACE IntStatements RBRACE SEMICOLON?
+InterfaceRef <- KEYWORD_interface (ParameterizedType / QualifiedType)
+
+DelegateDef <- Attributes? KEYWORD_delegate Type Ident (LARROW TypeParameters RARROW)? LPAREN ArgList? RPAREN SEMICOLON?
+
+RequiredTypes <- (ParameterizedType / QualifiedType) (COMMA (ParameterizedType / QualifiedType))*
+Requires <- KEYWORD_requires RequiredTypes
+
+Module <- KEYWORD_module TypeName
+ModuleDef <- Attributes? Module LBRACE IntStatements RBRACE SEMICOLON?
+
+StorageClassSpec
+    <- KEYWORD_extern
+     / KEYWORD_static
+     / KEYWORD_register
+
+FunctionSpecifier <- KEYWORD_inline
+TypeQualifier <- KEYWORD_const
+TypeQualList <- TypeQualifier*
+
+DeclSpec <- DeclSpecNoType? Type DeclSpecNoType?
+UnqualifiedDeclSpec <- DeclSpecNoType? UnqualifiedType DeclSpecNoType?
+
+DeclSpecNoType
+    <- TypeQualifier DeclSpecNoType?
+     / FunctionSpecifier DeclSpecNoType?
+     / StorageClassSpec DeclSpecNoType?
+
+Declarator
+    <- ASTERISK TypeQualList? Declarator
+     / CallConv Declarator
+     / DirectDeclarator
+
+DirectDeclarator <- DirectDeclaratorBase DirectDeclaratorSuffix*
+DirectDeclaratorBase
+    <- IDENTIFIER
+     / LPAREN Declarator RPAREN
+DirectDeclaratorSuffix
+    <- Array
+     / LPAREN Args? RPAREN
+
+AbstractDeclarator
+    <- ASTERISK TypeQualList? AbstractDeclarator?
+     / CallConv AbstractDeclarator?
+     / AbstractDirectDeclarator
+
+AbstractDeclaratorNoDirect
+    <- ASTERISK TypeQualList? AnyDeclarator?
+     / CallConv AnyDeclarator?
+
+AbstractDirectDeclarator <- AbstractDirectDeclaratorBase AbstractDirectDeclaratorSuffix*
+AbstractDirectDeclaratorBase <- LPAREN AbstractDeclaratorNoDirect RPAREN
+AbstractDirectDeclaratorSuffix
+    <- Array
+     / LPAREN Args? RPAREN
+
+AnyDeclarator
+    <- ASTERISK TypeQualList? AnyDeclarator?
+     / CallConv AnyDeclarator?
+     / AnyDirectDeclarator
+
+AnyDeclaratorNoDirect
+    <- ASTERISK TypeQualList? AnyDeclarator?
+     / CallConv AnyDeclarator
+
+AnyDirectDeclarator <- AnyDirectDeclaratorBase AnyDirectDeclaratorSuffix*
+AnyDirectDeclaratorBase
+    <- IDENTIFIER
+     / LPAREN AnyDeclaratorNoDirect RPAREN
+AnyDirectDeclaratorSuffix
+    <- Array
+     / LPAREN Args? RPAREN
+
+DeclaratorList <- Declarator (COMMA Declarator)*
+
+BitField <- COLON ExprConst
+
+StructDeclarator <- AnyDeclarator BitField?
+StructDeclaratorList <- StructDeclarator (COMMA StructDeclarator)*
+InitDeclarator <- Declarator (EQUAL ExprConst)?
+
+ThreadingType
+    <- 'apartment' end_of_word
+     / 'neutral' end_of_word
+     / 'single' end_of_word
+     / 'free' end_of_word
+     / 'both' end_of_word
+
+MarshalingBehavior
+    <- 'agile'
+     / 'none'
+     / 'standard'
+
+PointerType
+    <- 'ref' end_of_word
+     / 'unique' end_of_word
+     / 'ptr' end_of_word
+
+StructDef <- KEYWORD_struct IDENTIFIER? LBRACE Fields RBRACE
+
+UnqualifiedType
+    <- KEYWORD_void
+     / BaseType
+     / EnumDef
+     / KEYWORD_enum IDENTIFIER
+     / StructDef
+     / KEYWORD_struct IDENTIFIER
+     / UnionDef
+     / KEYWORD_union IDENTIFIER
+     / KEYWORD_SAFEARRAY LPAREN Type RPAREN
+     / KnownType
+
+Type
+    <- ParameterizedType
+     / NamespacePfx TypeName
+     / UnqualifiedType
+
+TypeDef <- Attributes? KEYWORD_typedef Attributes? DeclSpec DeclaratorList
+
+UnionDef
+    <- KEYWORD_union IDENTIFIER? LBRACE NeUnionFields RBRACE
+     / KEYWORD_union IDENTIFIER? KEYWORD_switch LPAREN SField RPAREN Ident? LBRACE Cases RBRACE
+
+Version
+    <- DECINTEGER (DOT INTEGER)?
+     / HEXINTEGER
+
+AcfStatements <- AcfInterface*
+AcfIntStatements <- AcfIntStatement*
+AcfIntStatement <- KEYWORD_typedef AcfAttributes? KnownType SEMICOLON
+AcfInterface <- AcfAttributes? KEYWORD_interface KnownType LBRACE AcfIntStatements? RBRACE
+AcfAttributes <- LBRACKET AcfAttributeList RBRACKET
+AcfAttributeList <- AcfAttribute (COMMA AcfAttribute)*
+AcfAttribute
+    <- KEYWORD_ATTR_encode
+     / KEYWORD_ATTR_decode
+     / KEYWORD_ATTR_explicit_handle
+
+# *** Tokens ***
+eof <- !.
+bin <- [01]
+bin_ <- '_'? bin
+oct <- [0-7]
+oct_ <- '_'? oct
+hex <- [0-9a-fA-F]
+hex_ <- '_'? hex
+dec <- [0-9]
+dec_ <- '_'? dec
+
+bin_int <- bin bin_*
+oct_int <- oct oct_*
+dec_int <- dec dec_*
+hex_int <- hex hex_*
+
+char_escape
+    <- "\\x" hex hex
+     / "\\u{" hex+ "}"
+     / "\\" [nr\\t'"]
+
+string <- (char_escape / [^\\"\n])*
+sqstring <- (char_escape / [^'\\\n])*
+
+line_comment <- '//' ![!/][^\n]* / '////' [^\n]*
+block_comment <- '/*' (!'*/' .)* '*/'
+skip <- ([ \n] / line_comment / block_comment)*
+
+FLOAT
+    <- '0x' hex_int '.' hex_int ([pP] [-+]? dec_int)? skip
+     /      dec_int '.' dec_int ([eE] [-+]? dec_int)? skip
+     / '0x' hex_int [pP] [-+]? dec_int skip
+     /      dec_int [eE] [-+]? dec_int skip
+INTEGER
+    <- '0b' bin_int skip
+     / '0o' oct_int skip
+     / '0x' hex_int skip
+     /      dec_int   skip
+
+DECINTEGER <- dec_int skip
+HEXINTEGER <- '0x' hex_int skip
+
+STRINGLITERAL <- '"' string '"' skip
+WSTRINGLITERAL <- 'L' STRINGLITERAL
+SQSTRINGLITERAL <- '\'' sqstring '\'' skip
+
+IDENTIFIER <- !keyword [A-Za-z_] [A-Za-z0-9_]* skip
+
+AMPERSAND            <- '&'      ![&]      skip
+AMPERSAND2           <- '&&'               skip
+ASTERISK             <- '*'                skip
+CARET                <- '^'      ![=]      skip
+COLON                <- ':'                skip
+COMMA                <- ','                skip
+DOT                  <- '.'      ![.?]     skip
+ELLIPSIS             <- '...'              skip
+EQUAL                <- '='      ![>=]     skip
+EQUAL2               <- '=='               skip
+EXCLAMATIONMARK      <- '!'      ![=]      skip
+EXCLAMATIONMARKEQUAL <- '!='               skip
+LARROW               <- '<'      ![<=]     skip
+LARROW2              <- '<<'               skip
+LARROWEQUAL          <- '<='               skip
+LBRACE               <- '{'                skip
+LBRACKET             <- '['                skip
+LPAREN               <- '('                skip
+MEMBERPTR            <- '->'               skip
+MINUS                <- '-'      ![->]     skip
+MINUS2               <- '--'               skip
+PERCENT              <- '%'                skip
+PIPE                 <- '|'      ![|]      skip
+PIPE2                <- '||'               skip
+PLUS                 <- '+'      ![+]      skip
+PLUS2                <- '++'               skip
+QUESTIONMARK         <- '?'                skip
+RARROW               <- '>'      ![>]      skip
+RARROW2              <- '>>'               skip
+RARROWEQUAL          <- '>='               skip
+RBRACE               <- '}'                skip
+RBRACKET             <- ']'                skip
+RPAREN               <- ')'                skip
+SEMICOLON            <- ';'                skip
+SLASH                <- '/'                skip
+TILDE                <- '~'                skip
+
+UUID         <- Hex8 '-' Hex4 '-' Hex4 '-' Hex4 '-' Hex12
+HexDigit     <- [0-9a-fA-F]
+Hex4         <- HexDigit HexDigit HexDigit HexDigit
+Hex8         <- Hex4 Hex4
+Hex12        <- Hex4 Hex4 Hex4
+
+end_of_word <- ![a-zA-Z0-9_] skip
+
+KEYWORD_FALSE <- 'FALSE' end_of_word
+KEYWORD_ISO_LATIN_1 <- 'ISO_LATIN_1' end_of_word
+KEYWORD_ISO_MULTI_LINGUAL <- 'ISO_MULTI_LINGUAL' end_of_word
+KEYWORD_ISO_UCS <- 'ISO_UCS' end_of_word
+KEYWORD_NULL <- 'NULL' end_of_word
+KEYWORD_SAFEARRAY <- 'SAFEARRAY' end_of_word
+KEYWORD_TRUE <- 'TRUE' end_of_word
+KEYWORD___alignof <- '__alignof' end_of_word
+KEYWORD___asm <- '__asm' end_of_word
+KEYWORD___cdecl <- '__cdecl' end_of_word
+KEYWORD___declspec <- '__declspec' end_of_word
+KEYWORD___export <- '__export' end_of_word
+KEYWORD___external_symbol <- '__external_symbol' end_of_word
+KEYWORD___far <- '__far' end_of_word
+KEYWORD___fastcall <- '__fastcall' end_of_word
+KEYWORD___float128 <- '__float128' end_of_word
+KEYWORD___float80 <- '__float80' end_of_word
+KEYWORD___fortran <- '__fortran' end_of_word
+KEYWORD___huge <- '__huge' end_of_word
+KEYWORD___inline <- '__inline' end_of_word
+KEYWORD___int128 <- '__int128' end_of_word
+KEYWORD___int32 <- '__int32' end_of_word
+KEYWORD___int3264 <- '__int3264' end_of_word
+KEYWORD___int64 <- '__int64' end_of_word
+KEYWORD___interface_interception_info <- '__interface_interception_info' end_of_word
+KEYWORD___loadds <- '__loadds' end_of_word
+KEYWORD___method_property <- '__method_property' end_of_word
+KEYWORD___near <- '__near' end_of_word
+KEYWORD___pascal <- '__pascal' end_of_word
+KEYWORD___ptr32 <- '__ptr32' end_of_word
+KEYWORD___ptr64 <- '__ptr64' end_of_word
+KEYWORD___saveregs <- '__saveregs' end_of_word
+KEYWORD___segment <- '__segment' end_of_word
+KEYWORD___self <- '__self' end_of_word
+KEYWORD___stdcall <- '__stdcall' end_of_word
+KEYWORD___unaligned <- '__unaligned' end_of_word
+KEYWORD___w64 <- '__w64' end_of_word
+KEYWORD___winrt_type_serialization_info <- '__winrt_type_serialization_info' end_of_word
+KEYWORD__asm <- '_asm' end_of_word
+KEYWORD__cdecl <- '_cdecl' end_of_word
+KEYWORD__declspec <- '_declspec' end_of_word
+KEYWORD__export <- '_export' end_of_word
+KEYWORD__far <- '_far' end_of_word
+KEYWORD__fastcall <- '_fastcall' end_of_word
+KEYWORD__fortran <- '_fortran' end_of_word
+KEYWORD__huge <- '_huge' end_of_word
+KEYWORD__inline <- '_inline' end_of_word
+KEYWORD__loadds <- '_loadds' end_of_word
+KEYWORD__near <- '_near' end_of_word
+KEYWORD__pascal <- '_pascal' end_of_word
+KEYWORD__saveregs <- '_saveregs' end_of_word
+KEYWORD__segment <- '_segment' end_of_word
+KEYWORD__self <- '_self' end_of_word
+KEYWORD__stdcall <- '_stdcall' end_of_word
+KEYWORD_apicontract <- 'apicontract' end_of_word
+KEYWORD_attribute <- 'attribute' end_of_word
+KEYWORD_attributename <- 'attributename' end_of_word
+KEYWORD_attributeusage <- 'attributeusage' end_of_word
+KEYWORD_auto <- 'auto' end_of_word
+KEYWORD_boolean <- 'boolean' end_of_word
+KEYWORD_byte <- 'byte' end_of_word
+KEYWORD_case <- 'case' end_of_word
+KEYWORD_cdecl <- 'cdecl' end_of_word
+KEYWORD_char <- 'char' end_of_word
+KEYWORD_coclass <- 'coclass' end_of_word
+KEYWORD_composable <- 'composable' end_of_word
+KEYWORD_const <- 'const' end_of_word
+KEYWORD_constructor_name <- 'constructor_name' end_of_word
+KEYWORD_contract <- 'contract' end_of_word
+KEYWORD_contractversion <- 'contractversion' end_of_word
+KEYWORD_cpp_quote <- 'cpp_quote' end_of_word
+KEYWORD_declare <- 'declare' end_of_word
+KEYWORD_declare_guid <- 'declare_guid' end_of_word
+KEYWORD_default <- 'default' end_of_word
+KEYWORD_delegate <- 'delegate' end_of_word
+KEYWORD_deprecate <- 'deprecate' end_of_word
+KEYWORD_deprecated <- 'deprecated' end_of_word
+KEYWORD_dispinterface <- 'dispinterface' end_of_word
+KEYWORD_double <- 'double' end_of_word
+KEYWORD_enum <- 'enum' end_of_word
+KEYWORD_event <- 'event' end_of_word
+KEYWORD_eventadd <- 'eventadd' end_of_word
+KEYWORD_eventremove <- 'eventremove' end_of_word
+KEYWORD_exclusiveto <- 'exclusiveto' end_of_word
+KEYWORD_experimental <- 'experimental' end_of_word
+KEYWORD_extern <- 'extern' end_of_word
+KEYWORD_far <- 'far' end_of_word
+KEYWORD_feature <- 'feature' end_of_word
+KEYWORD_feature_name <- 'feature_name' end_of_word
+KEYWORD_float <- 'float' end_of_word
+KEYWORD_from_contract <- 'from_contract' end_of_word
+KEYWORD_get <- 'get' end_of_word
+KEYWORD_handle_t <- 'handle_t' end_of_word
+KEYWORD_hyper <- 'hyper' end_of_word
+KEYWORD_import <- 'import' end_of_word
+KEYWORD_importlib <- 'importlib' end_of_word
+KEYWORD_include <- 'include' end_of_word
+KEYWORD_inline <- 'inline' end_of_word
+KEYWORD_int <- 'int' end_of_word
+KEYWORD_interface <- 'interface' end_of_word
+KEYWORD_interface_name <- 'interface_name' end_of_word
+KEYWORD_internal <- 'internal' end_of_word
+KEYWORD_library <- 'library' end_of_word
+KEYWORD_long <- 'long' end_of_word
+KEYWORD_methods <- 'methods' end_of_word
+KEYWORD_midl_pragma <- 'midl_pragma' end_of_word
+KEYWORD_module <- 'module' end_of_word
+KEYWORD_namespace <- 'namespace' end_of_word
+KEYWORD_near <- 'near' end_of_word
+KEYWORD_overridable <- 'overridable' end_of_word
+KEYWORD_overridable_name <- 'overridable_name' end_of_word
+KEYWORD_partial <- 'partial' end_of_word
+KEYWORD_pascal <- 'pascal' end_of_word
+KEYWORD_pipe <- 'pipe' end_of_word
+KEYWORD_private_char_16 <- 'private_char_16' end_of_word
+KEYWORD_private_char_8 <- 'private_char_8' end_of_word
+KEYWORD_properties <- 'properties' end_of_word
+KEYWORD_protected <- 'protected' end_of_word
+KEYWORD_protected_name <- 'protected_name' end_of_word
+KEYWORD_register <- 'register' end_of_word
+KEYWORD_remote_async <- 'remote_async' end_of_word
+KEYWORD_remote_sync <- 'remote_sync' end_of_word
+KEYWORD_remove <- 'remove' end_of_word
+KEYWORD_requires <- 'requires' end_of_word
+KEYWORD_return_name <- 'return_name' end_of_word
+KEYWORD_runtimeclass <- 'runtimeclass' end_of_word
+KEYWORD_set <- 'set' end_of_word
+KEYWORD_short <- 'short' end_of_word
+KEYWORD_signed <- 'signed' end_of_word
+KEYWORD_sizeof <- 'sizeof' end_of_word
+KEYWORD_small <- 'small' end_of_word
+KEYWORD_static <- 'static' end_of_word
+KEYWORD_static_name <- 'static_name' end_of_word
+KEYWORD_stdcall <- 'stdcall' end_of_word
+KEYWORD_struct <- 'struct' end_of_word
+KEYWORD_switch <- 'switch' end_of_word
+KEYWORD_typedef <- 'typedef' end_of_word
+KEYWORD_type <- 'type' end_of_word
+KEYWORD_union <- 'union' end_of_word
+KEYWORD_unsealed <- 'unsealed' end_of_word
+KEYWORD_unsigned <- 'unsigned' end_of_word
+KEYWORD_void <- 'void' end_of_word
+KEYWORD_volatile <- 'volatile' end_of_word
+
+keyword
+    <- KEYWORD_FALSE
+     / KEYWORD_ISO_LATIN_1
+     / KEYWORD_ISO_MULTI_LINGUAL
+     / KEYWORD_ISO_UCS
+     / KEYWORD_NULL
+     / KEYWORD_SAFEARRAY
+     / KEYWORD_TRUE
+     / KEYWORD___alignof
+     / KEYWORD___asm
+     / KEYWORD___cdecl
+     / KEYWORD___declspec
+     / KEYWORD___export
+     / KEYWORD___external_symbol
+     / KEYWORD___far
+     / KEYWORD___fastcall
+     / KEYWORD___float128
+     / KEYWORD___float80
+     / KEYWORD___fortran
+     / KEYWORD___huge
+     / KEYWORD___inline
+     / KEYWORD___int128
+     / KEYWORD___int32
+     / KEYWORD___int3264
+     / KEYWORD___int64
+     / KEYWORD___interface_interception_info
+     / KEYWORD___loadds
+     / KEYWORD___method_property
+     / KEYWORD___near
+     / KEYWORD___pascal
+     / KEYWORD___ptr32
+     / KEYWORD___ptr64
+     / KEYWORD___saveregs
+     / KEYWORD___segment
+     / KEYWORD___self
+     / KEYWORD___stdcall
+     / KEYWORD___unaligned
+     / KEYWORD___w64
+     / KEYWORD___winrt_type_serialization_info
+     / KEYWORD__asm
+     / KEYWORD__cdecl
+     / KEYWORD__declspec
+     / KEYWORD__export
+     / KEYWORD__far
+     / KEYWORD__fastcall
+     / KEYWORD__fortran
+     / KEYWORD__huge
+     / KEYWORD__inline
+     / KEYWORD__loadds
+     / KEYWORD__near
+     / KEYWORD__pascal
+     / KEYWORD__saveregs
+     / KEYWORD__segment
+     / KEYWORD__self
+     / KEYWORD__stdcall
+     / KEYWORD_apicontract
+     / KEYWORD_attribute
+     / KEYWORD_attributename
+     / KEYWORD_attributeusage
+     / KEYWORD_auto
+     / KEYWORD_boolean
+     / KEYWORD_byte
+     / KEYWORD_case
+     / KEYWORD_cdecl
+     / KEYWORD_char
+     / KEYWORD_coclass
+     / KEYWORD_composable
+     / KEYWORD_const
+     / KEYWORD_constructor_name
+     / KEYWORD_contract
+     / KEYWORD_contractversion
+     / KEYWORD_cpp_quote
+     / KEYWORD_declare
+     / KEYWORD_declare_guid
+     / KEYWORD_default
+     / KEYWORD_delegate
+     / KEYWORD_deprecate
+     / KEYWORD_deprecated
+     / KEYWORD_dispinterface
+     / KEYWORD_double
+     / KEYWORD_enum
+     / KEYWORD_event
+     / KEYWORD_eventadd
+     / KEYWORD_eventremove
+     / KEYWORD_exclusiveto
+     / KEYWORD_experimental
+     / KEYWORD_extern
+     / KEYWORD_far
+     / KEYWORD_feature
+     / KEYWORD_feature_name
+     / KEYWORD_float
+     / KEYWORD_from_contract
+     / KEYWORD_get
+     / KEYWORD_handle_t
+     / KEYWORD_hyper
+     / KEYWORD_import
+     / KEYWORD_importlib
+     / KEYWORD_include
+     / KEYWORD_inline
+     / KEYWORD_int
+     / KEYWORD_interface
+     / KEYWORD_interface_name
+     / KEYWORD_internal
+     / KEYWORD_library
+     / KEYWORD_long
+     / KEYWORD_methods
+     / KEYWORD_midl_pragma
+     / KEYWORD_module
+     / KEYWORD_namespace
+     / KEYWORD_near
+     / KEYWORD_overridable
+     / KEYWORD_overridable_name
+     / KEYWORD_partial
+     / KEYWORD_pascal
+     / KEYWORD_pipe
+     / KEYWORD_private_char_16
+     / KEYWORD_private_char_8
+     / KEYWORD_properties
+     / KEYWORD_protected
+     / KEYWORD_protected_name
+     / KEYWORD_register
+     / KEYWORD_remote_async
+     / KEYWORD_remote_sync
+     / KEYWORD_remove
+     / KEYWORD_requires
+     / KEYWORD_return_name
+     / KEYWORD_runtimeclass
+     / KEYWORD_set
+     / KEYWORD_short
+     / KEYWORD_signed
+     / KEYWORD_sizeof
+     / KEYWORD_small
+     / KEYWORD_static
+     / KEYWORD_static_name
+     / KEYWORD_stdcall
+     / KEYWORD_struct
+     / KEYWORD_switch
+     / KEYWORD_typedef
+     / KEYWORD_type
+     / KEYWORD_union
+     / KEYWORD_unsealed
+     / KEYWORD_unsigned
+     / KEYWORD_void
+     / KEYWORD_volatile
+
+KEYWORD_ATTR_activatable <- 'activatable' end_of_word
+KEYWORD_ATTR_aggretable <- 'aggretable' end_of_word
+KEYWORD_ATTR_annotation <- 'annotation' end_of_word
+KEYWORD_ATTR_appobject <- 'appobject' end_of_word
+KEYWORD_ATTR_async <- 'async' end_of_word
+KEYWORD_ATTR_asyncuuid <- 'async_uuid' end_of_word
+KEYWORD_ATTR_autohandle <- 'auto_handle' end_of_word
+KEYWORD_ATTR_bindable <- 'bindable' end_of_word
+KEYWORD_ATTR_broadcast <- 'broadcast' end_of_word
+KEYWORD_ATTR_call_as <- 'call_as' end_of_word
+KEYWORD_ATTR_case <- 'case' end_of_word
+KEYWORD_ATTR_code <- 'code' end_of_word
+KEYWORD_ATTR_comm_status <- 'comm_status' end_of_word
+KEYWORD_ATTR_composable <- 'composable' end_of_word
+KEYWORD_ATTR_context_handle <- 'context_handle' end_of_word
+KEYWORD_ATTR_context_handle_noserialize <- 'context_handle_noserialize' end_of_word
+KEYWORD_ATTR_context_handle_serialize <- 'context_handle_serialize' end_of_word
+KEYWORD_ATTR_contract <- 'contract' end_of_word
+KEYWORD_ATTR_contract_version <- 'contract_version' end_of_word
+KEYWORD_ATTR_control <- 'control' end_of_word
+KEYWORD_ATTR_custom <- 'custom' end_of_word
+KEYWORD_ATTR_decode <- 'decode' end_of_word
+KEYWORD_ATTR_default <- 'default' end_of_word
+KEYWORD_ATTR_defaultbind <- 'defaultbind' end_of_word
+KEYWORD_ATTR_defaultcollelem <- 'defaultcollelem' end_of_word
+KEYWORD_ATTR_defaultvalue <- 'defaultvalue' end_of_word
+KEYWORD_ATTR_defaultvtable <- 'defaultvtable' end_of_word
+KEYWORD_ATTR_deprecated <- 'deprecated' end_of_word
+KEYWORD_ATTR_disable_consistency_check <- 'disable_consistency_check' end_of_word
+KEYWORD_ATTR_displaybind <- 'displaybind' end_of_word
+KEYWORD_ATTR_dllname <- 'dllname' end_of_word
+KEYWORD_ATTR_dual <- 'dual' end_of_word
+KEYWORD_ATTR_enable_allocate <- 'enable_allocate' end_of_word
+KEYWORD_ATTR_encode <- 'encode' end_of_word
+KEYWORD_ATTR_endpoint <- 'endpoint' end_of_word
+KEYWORD_ATTR_entry <- 'entry' end_of_word
+KEYWORD_ATTR_event_add <- 'event_add' end_of_word
+KEYWORD_ATTR_event_remove <- 'event_remove' end_of_word
+KEYWORD_ATTR_exclusive_to <- 'exclusive_to' end_of_word
+KEYWORD_ATTR_explicit_handle <- 'explicit_handle' end_of_word
+KEYWORD_ATTR_fault_status <- 'fault_status' end_of_word
+KEYWORD_ATTR_force_allocate <- 'force_allocate' end_of_word
+KEYWORD_ATTR_handle <- 'handle' end_of_word
+KEYWORD_ATTR_helpcontext <- 'helpcontext' end_of_word
+KEYWORD_ATTR_helpfile <- 'helpfile' end_of_word
+KEYWORD_ATTR_helpstring <- 'helpstring' end_of_word
+KEYWORD_ATTR_helpstringcontext <- 'helpstringcontext' end_of_word
+KEYWORD_ATTR_helpstringdll <- 'helpstringdll' end_of_word
+KEYWORD_ATTR_hidden <- 'hidden' end_of_word
+KEYWORD_ATTR_id <- 'id' end_of_word
+KEYWORD_ATTR_idempotent <- 'idempotent' end_of_word
+KEYWORD_ATTR_ignore <- 'ignore' end_of_word
+KEYWORD_ATTR_iid_is <- 'iid_is' end_of_word
+KEYWORD_ATTR_immediatebind <- 'immediatebind' end_of_word
+KEYWORD_ATTR_implicit_handle <- 'implicit_handle' end_of_word
+KEYWORD_ATTR_in <- 'in' end_of_word
+KEYWORD_ATTR_input_sync <- 'input_sync' end_of_word
+KEYWORD_ATTR_lcid <- 'lcid' end_of_word
+KEYWORD_ATTR_length_is <- 'length_is' end_of_word
+KEYWORD_ATTR_licensed <- 'licensed' end_of_word
+KEYWORD_ATTR_local <- 'local' end_of_word
+KEYWORD_ATTR_marshaling_behavior <- 'marshaling_behavior' end_of_word
+KEYWORD_ATTR_maybe <- 'maybe' end_of_word
+KEYWORD_ATTR_message <- 'message' end_of_word
+KEYWORD_ATTR_nocode <- 'nocode' end_of_word
+KEYWORD_ATTR_nonbrowsable <- 'nonbrowsable' end_of_word
+KEYWORD_ATTR_noncreatable <- 'noncreatable' end_of_word
+KEYWORD_ATTR_nonextensible <- 'nonextensible' end_of_word
+KEYWORD_ATTR_notify <- 'notify' end_of_word
+KEYWORD_ATTR_notify_flag <- 'notify_flag' end_of_word
+KEYWORD_ATTR_object <- 'object' end_of_word
+KEYWORD_ATTR_odl <- 'odl' end_of_word
+KEYWORD_ATTR_oleautomation <- 'oleautomation' end_of_word
+KEYWORD_ATTR_optimize <- 'optimize' end_of_word
+KEYWORD_ATTR_optional <- 'optional' end_of_word
+KEYWORD_ATTR_out <- 'out' end_of_word
+KEYWORD_ATTR_partial_ignore <- 'partial_ignore' end_of_word
+KEYWORD_ATTR_pointer_default <- 'pointer_default' end_of_word
+KEYWORD_ATTR_progid <- 'progid' end_of_word
+KEYWORD_ATTR_propget <- 'propget' end_of_word
+KEYWORD_ATTR_propput <- 'propput' end_of_word
+KEYWORD_ATTR_propputref <- 'propputref' end_of_word
+KEYWORD_ATTR_proxy <- 'proxy' end_of_word
+KEYWORD_ATTR_public <- 'public' end_of_word
+KEYWORD_ATTR_range <- 'range' end_of_word
+KEYWORD_ATTR_readonly <- 'readonly' end_of_word
+KEYWORD_ATTR_represent_as <- 'represent_as' end_of_word
+KEYWORD_ATTR_requestedit <- 'requestedit' end_of_word
+KEYWORD_ATTR_restricted <- 'restricted' end_of_word
+KEYWORD_ATTR_retval <- 'retval' end_of_word
+KEYWORD_ATTR_size_is <- 'size_is' end_of_word
+KEYWORD_ATTR_source <- 'source' end_of_word
+KEYWORD_ATTR_static <- 'static' end_of_word
+KEYWORD_ATTR_strict_context_handle <- 'strict_context_handle' end_of_word
+KEYWORD_ATTR_string <- 'string' end_of_word
+KEYWORD_ATTR_switch_is <- 'switch_is' end_of_word
+KEYWORD_ATTR_switch_type <- 'switch_type' end_of_word
+KEYWORD_ATTR_threading <- 'threading' end_of_word
+KEYWORD_ATTR_transmit_as <- 'transmit_as' end_of_word
+KEYWORD_ATTR_uidefault <- 'uidefault' end_of_word
+KEYWORD_ATTR_user_marshal <- 'user_marshal' end_of_word
+KEYWORD_ATTR_usesgetlasterror <- 'usesgetlasterror' end_of_word
+KEYWORD_ATTR_uuid <- 'uuid' end_of_word
+KEYWORD_ATTR_v1_enum <- 'v1_enum' end_of_word
+KEYWORD_ATTR_vararg <- 'vararg' end_of_word
+KEYWORD_ATTR_version <- 'version' end_of_word
+KEYWORD_ATTR_viprogid <- 'vi_progid' end_of_word
+KEYWORD_ATTR_wire_marshal <- 'wire_marshal' end_of_word

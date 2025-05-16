@@ -1,0 +1,18 @@
+.{
+    .name = .zig_idl,
+    .version = "0.0.0",
+    .fingerprint = 0x4060c95f11c35c97, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.15.0-dev.355+206bd1ced",
+    .dependencies = .{
+        .aro = .{
+            .url = "git+https://github.com/Vexu/arocc.git#f954ddd40b43ec6fd4d349a13ba7ceff3c4e1055",
+            .hash = "aro-0.0.0-JSD1QpulJgCjZGRsRCYJ1ejW1T13wmEsrx06o4Qhb6s1",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

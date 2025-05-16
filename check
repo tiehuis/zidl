@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+[[ $# -eq 1 && "$1" == *.idl ]] || { echo "Usage: $0 <file.idl>"; exit 1; }
+
+file_idl="$1"
+file_h="${file_idl%.idl}.h"
+
+[[ -f "$file_idl" ]] || { echo "Missing IDL: $file_idl"; exit 1; }
+[[ -f "$file_h"   ]] || { echo "Missing header: $file_h"; exit 1; }
+
+gen_h=$(mktemp)
+echo $gen_h
+./zig-out/bin/zidl "$file_idl" --log-level err --codegen &> "$gen_h"
+
+if diff -q "$file_h" "$gen_h" > /dev/null; then
+  echo "✔ Header matches."
+else
+  echo "✘ Header mismatch:"
+  git diff --no-index "$file_h" "$gen_h"
+  exit 1
+fi
+

@@ -1,0 +1,9 @@
+/**
+ * This file is part of the mingw-w64 runtime package.
+ * No warranty is given; refer to the file DISCLAIMER within this package.
+ */
+
+[object, uuid (F1072A57-214f-4ee2-8377-14ef140cd9f3), async_uuid (860d8fd9-0219-43ea-AE7F-59611f4cc16a), pointer_default (unique)]
+interface INapSystemHealthAgentCallback {
+  HRESULT GetFixupInfo ([out] FixupInfo **info);
+};

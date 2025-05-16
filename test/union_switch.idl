@@ -1,0 +1,18 @@
+typedef union _GDI_OBJECT switch (DWORD ObjectType) u {
+  case OBJ_BITMAP: wireHBITMAP hBitmap;
+  case OBJ_PAL: wireHPALETTE hPalette;
+  default: wireHGLOBAL hGeneric;
+} GDI_OBJECT;
+typedef struct _userSTGMEDIUM {
+  union _STGMEDIUM_UNION switch (DWORD tymed) u {
+    case TYMED_NULL:;
+    case TYMED_MFPICT: wireHMETAFILEPICT hMetaFilePict;
+    case TYMED_ENHMF: wireHENHMETAFILE hHEnhMetaFile;
+    case TYMED_GDI: GDI_OBJECT *hGdiHandle;
+    case TYMED_HGLOBAL: wireHGLOBAL hGlobal;
+    case TYMED_FILE: LPOLESTR lpszFileName;
+    case TYMED_ISTREAM: BYTE_BLOB *pstm;
+    case TYMED_ISTORAGE: BYTE_BLOB *pstg;
+  } DUMMYUNIONNAME;
+  IUnknown *pUnkForRelease;
+} userSTGMEDIUM;
