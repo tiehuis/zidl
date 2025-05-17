@@ -616,7 +616,10 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
             try cg.printIndent(4);
             try cg.print("virtual ", .{});
             try cg.genType(decl.decl_spec); // Return Type
-
+            if (d.is_pointer) {
+                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
+                try cg.print(" ", .{});
+            }
             if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
 
             const dd: Node.DirectDeclarator = blk: {
@@ -898,9 +901,30 @@ const GenArgListOptions = struct {
     only_name: bool = false,
 };
 
+fn pointerCount(cg: *CodeGen, ref: Node.Ref) usize {
+    return switch (cg.nodes[ref.toInt()]) {
+        .abstract_declarator,
+        .any_declarator,
+        .declarator,
+        => |d| @intFromBool(d.is_pointer) +
+            if (d.decl) |sd| cg.pointerCount(sd) else 0,
+        else => 0,
+    };
+}
+
 fn isVoidType(cg: *CodeGen, index: Node.Ref) bool {
     return switch (cg.nodes[index.toInt()]) {
-        .func_param => |p| cg.isVoidType(p.decl_spec),
+        .func_param => |p| {
+            const count = if (p.any_decl) |d| cg.pointerCount(d) else 0;
+            return count == 0 and cg.isVoidType(p.decl_spec);
+        },
+        .any_declarator,
+        .abstract_declarator,
+        .declarator,
+        => |d| {
+            const count = cg.pointerCount(index);
+            return count == 0 and if (d.decl) |decl| cg.isVoidType(decl) else false;
+        },
         .decl_spec_type => |ds| cg.isVoidType(ds.type),
         .base_type => |p| switch (p) {
             .void => true,
@@ -958,6 +982,10 @@ fn genCVtableFuncDef(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
         for (if (is_async) func_gen_async else func_gen) |func| {
             try cg.printIndent(4);
             try cg.genType(decl.decl_spec); // Return Type
+            if (d.is_pointer) {
+                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
+                try cg.print(" ", .{});
+            }
             try cg.print("(", .{});
             if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
 
@@ -1178,6 +1206,10 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
 
             try cg.print("static inline ", .{});
             try cg.genType(decl.decl_spec); // Return Type
+            if (d.is_pointer) {
+                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
+                try cg.print(" ", .{});
+            }
             try cg.print("{s}{s}_{s}", .{ prefix, interface_name, func.prefix });
             try cg.genType(dd.base); // Function Name
             try cg.print("({s}{s}* This", .{ prefix, interface_name });
@@ -1187,7 +1219,11 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
             }
             try cg.print(") {{\n", .{});
             try cg.printIndent(4);
-            try cg.print("return This->lpVtbl->{s}", .{func.prefix});
+            // Ideally use the ref to decl and don't need to conditions
+            if (!cg.isVoidType(decl.decl_spec) or cg.pointerCount(id.declarator) != 0) {
+                try cg.print("return ", .{});
+            }
+            try cg.print("This->lpVtbl->{s}", .{func.prefix});
             try cg.genType(dd.base);
             try cg.print("(This", .{});
             if (func.args) {
@@ -1267,7 +1303,10 @@ fn genInterfaceProxy(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl) 
     if (decl.init_decl) |init_decl| {
         const id = try cg.nodeAs(init_decl, .init_declarator);
         const d = try cg.nodeAs(id.declarator, .declarator);
-
+        if (d.is_pointer) {
+            for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
+            try cg.print(" ", .{});
+        }
         if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
 
         const dd: Node.DirectDeclarator = blk: {

@@ -73,3 +73,7 @@ test "v1_enum" {
 test "typedef_multi" {
     try expect("typedef_multi");
 }
+
+test "void" {
+    try expect("void");
+}
