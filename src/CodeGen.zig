@@ -685,8 +685,9 @@ fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!isize {
             .expr => |ev| try cg.resolveConstExpr(ev),
             // TODO: May need to handle constant symbols
             .identifier,
-            .null,
             .string,
+            => 0,
+            .null,
             => error.CodeGenError,
         },
         else => {

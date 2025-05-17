@@ -35,7 +35,7 @@ pub const Token = struct {
         .{ "ISO_MULTI_LINGUAL", .keyword_ISO_MULTI_LINGUAL },
         .{ "ISO_UCS", .keyword_ISO_UCS },
         .{ "NULL", .keyword_NULL },
-        .{ "SAFEARRAY", .keyword_SAFEARRAY },
+        //.{ "SAFEARRAY", .keyword_SAFEARRAY },
         .{ "TRUE", .keyword_TRUE },
         .{ "__alignof", .keyword___alignof },
         .{ "__asm", .keyword___asm },
