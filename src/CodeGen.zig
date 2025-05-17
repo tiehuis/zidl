@@ -1032,6 +1032,7 @@ fn genInterfaceCVtableParents(cg: *CodeGen, child_typename: []const u8, interfac
             switch (parent) {
                 .interface => |iface| {
                     try cg.genInterfaceCVtableParents(child_typename, iface);
+                    if (iface.defs.empty()) continue;
 
                     try cg.printIndent(4);
                     try cg.print("/*** {s} methods ***/\n", .{parent_type});
@@ -1062,18 +1063,21 @@ fn genInterfaceCVtable(cg: *CodeGen, interface: Node.InterfaceDef, is_async: boo
     , .{ prefix, typename });
 
     try cg.genInterfaceCVtableParents(typename, interface);
-    try cg.printIndent(4);
-    try cg.print("/*** {s}{s} methods ***/\n", .{ prefix, typename });
 
-    for (interface.defs.start..interface.defs.end) |index| {
-        const node = cg.nodes[cg.data[index].toInt()];
-        switch (node) {
-            .decl => |decl| try cg.genCVtableFuncDef(typename, decl, is_async),
-            .typedef,
-            .cpp_quote,
-            .struct_def,
-            => {},
-            else => unreachable,
+    if (!interface.defs.empty()) {
+        try cg.printIndent(4);
+        try cg.print("/*** {s}{s} methods ***/\n", .{ prefix, typename });
+
+        for (interface.defs.start..interface.defs.end) |index| {
+            const node = cg.nodes[cg.data[index].toInt()];
+            switch (node) {
+                .decl => |decl| try cg.genCVtableFuncDef(typename, decl, is_async),
+                .typedef,
+                .cpp_quote,
+                .struct_def,
+                => {},
+                else => unreachable,
+            }
         }
     }
 
@@ -1103,6 +1107,7 @@ fn genInterfaceCObjMacrosParents(cg: *CodeGen, child_typename: []const u8, inter
             switch (parent) {
                 .interface => |iface| {
                     try cg.genInterfaceCObjMacrosParents(child_typename, iface);
+                    if (iface.defs.empty()) continue;
 
                     try cg.print("/*** {s} methods ***/\n", .{parent_type});
                     for (iface.defs.start..iface.defs.end) |parent_iface_index| {
@@ -1123,6 +1128,7 @@ fn genInterfaceCObjMacros(cg: *CodeGen, interface: Node.InterfaceDef, is_async: 
     const prefix = if (is_async) "Async" else "";
     const typename = cg.intern_pool.get(try cg.nodeAs(interface.name, .type)).?;
     try cg.genInterfaceCObjMacrosParents(typename, interface);
+    if (interface.defs.empty()) return;
     try cg.print("/*** {s}{s} methods ***/\n", .{ prefix, typename });
     for (interface.defs.start..interface.defs.end) |index| {
         const node = cg.nodes[cg.data[index].toInt()];
@@ -1146,6 +1152,7 @@ fn genInterfaceCInlineWrappersParents(cg: *CodeGen, child_typename: []const u8, 
             switch (parent) {
                 .interface => |iface| {
                     try cg.genInterfaceCInlineWrappersParents(child_typename, iface);
+                    if (iface.defs.empty()) continue;
 
                     try cg.print("/*** ", .{});
                     try cg.genType(cg.data[index]);
@@ -1169,6 +1176,7 @@ fn genInterfaceCInlineWrappers(cg: *CodeGen, interface: Node.InterfaceDef, is_as
     const prefix = if (is_async) "Async" else "";
     const typename = cg.intern_pool.get(cg.nodes[interface.name.toInt()].type).?;
     try cg.genInterfaceCInlineWrappersParents(typename, interface);
+    if (interface.defs.empty()) return;
     try cg.print("/*** {s}{s} methods ***/\n", .{ prefix, typename });
     for (interface.defs.start..interface.defs.end) |index| {
         const node = cg.nodes[cg.data[index].toInt()];
