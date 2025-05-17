@@ -65,3 +65,11 @@ test "anonymous_struct" {
 test "empty_attributes" {
     try expect("empty_attributes");
 }
+
+test "v1_enum" {
+    //try expect("v1_enum");
+}
+
+test "typedef_multi" {
+    try expect("typedef_multi");
+}

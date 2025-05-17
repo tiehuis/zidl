@@ -327,6 +327,19 @@ fn genName(cg: *CodeGen, node_ref: Node.Ref) !void {
         .direct_decl => |direct_decl| {
             try cg.genName(direct_decl.base);
         },
+        .decl_spec_type => |decl_spec_type| {
+            try cg.genName(decl_spec_type.type);
+        },
+        .struct_def => |struct_def| {
+            // TODO: if empty, use generated name
+            try cg.print("struct {s}", .{cg.intern_pool.get(struct_def.name.?).?});
+        },
+        .enum_def => |enum_def| {
+            try cg.print("enum {s}", .{cg.intern_pool.get(enum_def.name.?).?});
+        },
+        .union_def => |union_def| {
+            try cg.print("union {s}", .{cg.intern_pool.get(union_def.name.?).?});
+        },
         else => {
             std.debug.print("genType: unsupported node type: {s}\n", .{@tagName(node)});
             return error.UnexpectedNodeType;
@@ -701,10 +714,18 @@ fn genNameOrFallback(cg: *CodeGen, ref: ?InternPool.Ref) !void {
 fn genTypedef(cg: *CodeGen, typedef: Node.Typedef) Error!void {
     try cg.print("typedef ", .{});
     try cg.genType(typedef.decl_spec);
-    for (typedef.decl_list.start..typedef.decl_list.end) |index| {
-        try cg.genType(cg.data[index]);
-    }
+
+    std.debug.assert(!typedef.decl_list.empty());
+    try cg.genType(cg.data[typedef.decl_list.start]);
     try cg.print(";\n", .{});
+
+    for (typedef.decl_list.start + 1..typedef.decl_list.end) |index| {
+        try cg.print("typedef ", .{});
+        try cg.genName(typedef.decl_spec);
+        try cg.print(" ", .{});
+        try cg.genType(cg.data[index]);
+        try cg.print(";\n", .{});
+    }
 }
 
 fn genInterfaceTopLevel(cg: *CodeGen, interface: Node.InterfaceDef) Error!void {
