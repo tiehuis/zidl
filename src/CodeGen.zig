@@ -652,9 +652,92 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
     }
 }
 
+fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!isize {
+    const node = cg.nodes[expr.toInt()];
+    return switch (node) {
+        inline .expr_const,
+        .expr_const_int,
+        => |sub_expr| try cg.resolveConstExpr(sub_expr),
+        .expr_unary => |expr_unary| {
+            const a = try cg.resolveConstExpr(expr_unary.arg1);
+            return try computeOp(expr_unary.op, a, null, null);
+        },
+        .expr_binary => |expr_binary| {
+            const a = try cg.resolveConstExpr(expr_binary.arg1);
+            const b = try cg.resolveConstExpr(expr_binary.arg2);
+            return try computeOp(expr_binary.op, a, b, null);
+        },
+        .expr_ternary => |expr_ternary| {
+            const a = try cg.resolveConstExpr(expr_ternary.arg1);
+            const b = try cg.resolveConstExpr(expr_ternary.arg2);
+            const c = try cg.resolveConstExpr(expr_ternary.arg3);
+            return try computeOp(expr_ternary.op, a, b, c);
+        },
+        .expr => |e| switch (e) {
+            .false => 0,
+            .true => 1,
+            .number => |n| {
+                // TODO: Currently for enums, float doesn't make sense but will
+                // need to handle this (return a tagged union).
+                const lit = cg.intern_pool.get(n).?;
+                return std.fmt.parseInt(isize, lit, 0) catch return error.CodeGenError;
+            },
+            .expr => |ev| try cg.resolveConstExpr(ev),
+            // TODO: May need to handle constant symbols
+            .identifier,
+            .null,
+            .string,
+            => error.CodeGenError,
+        },
+        else => {
+            log.err("resolveConstExpr: unsupported node {s}", .{@tagName(node)});
+            return error.CodeGenError;
+        },
+    };
+}
+
+fn computeOp(op: Node.Op, a: isize, b: ?isize, c: ?isize) !isize {
+    return switch (op) {
+        .ternary_conditional => if (a != 0) b.? else c.?,
+        .logical_or => if (a != 0 or b.? != 0) 1 else 0,
+        .logical_and => if (a != 0 and b.? != 0) 1 else 0,
+        .@"and" => a & b.?,
+        .@"or" => a | b.?,
+        .xor => a ^ b.?,
+        .equal => if (a == b.?) 1 else 0,
+        .unequal => if (a != b.?) 1 else 0,
+        .compare_lt => if (a < b.?) 1 else 0,
+        .compare_gt => if (a > b.?) 1 else 0,
+        .compare_lte => if (a <= b.?) 1 else 0,
+        .compare_gte => if (a >= b.?) 1 else 0,
+        .shift_left => std.math.shl(isize, a, b.?),
+        .shift_right => std.math.shr(isize, a, b.?),
+        .add => a + b.?,
+        .sub => a - b.?,
+        .mul => a * b.?,
+        .div => @divTrunc(a, b.?),
+        .mod => @mod(a, b.?),
+        .positive => @intCast(@abs(a)),
+        .negative => -a,
+        .logical_not => if (a != 0) 0 else 1,
+        .not => ~a,
+        .inc => a + 1,
+        .dec => a + 1,
+
+        .ref,
+        .deref,
+        => error.CodeGenError,
+    };
+}
+
 fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
     try cg.print("enum ", .{});
     try cg.genNameOrFallback(enum_def.name);
+
+    // v1_enum attribute is usually attached to the typedef and not the enum itself
+    // so needs to be passed through.
+    const is_v1_enum = false;
+    var last_enum_value: isize = 0;
 
     try cg.print(" {{\n", .{});
     for (enum_def.members.start..enum_def.members.end) |index| {
@@ -664,6 +747,10 @@ fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
         if (enum_field.expr) |expr| {
             try cg.print(" = ", .{});
             try cg.genExpr(expr);
+            last_enum_value = try cg.resolveConstExpr(expr);
+        } else if (is_v1_enum) {
+            try cg.print(" = {}", .{last_enum_value});
+            last_enum_value += 1;
         }
         const last = index + 1 == enum_def.members.end;
         try cg.print("{s}\n", .{if (!last) "," else ""});
