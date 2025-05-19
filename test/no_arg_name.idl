@@ -1,0 +1,5 @@
+cpp_quote("")
+[object, uuid (51973c55-CB0C-11d0-B5C9-00a0244a0e7a), pointer_default (unique)]
+interface IDebugPropertyEnumType_All {
+  HRESULT GetName ([out] BSTR *, [out] BSTR *);
+};

@@ -27,6 +27,54 @@ forward_decl_table: std.ArrayList(Node.Ref),
 symbol_table: std.StringHashMap(Node.Ref),
 ole_auto_types: std.ArrayList(Node.OleAutoType),
 options: Options,
+scratch_ref: std.ArrayList(Node.Ref),
+scratch_range: std.ArrayList(Node.Range),
+
+// A lightweight stack-like view into a parent ArrayList, enabling efficient scoped
+// memory usage while sharing heap allocations across all usages.
+//
+// When using, it is important to reset once the current scope has completed.
+fn SubArrayList(comptime T: type) type {
+    return struct {
+        start: usize,
+        base: *std.ArrayList(T),
+
+        pub fn reset(sa: SubArrayList(T)) void {
+            sa.base.items.len = sa.start;
+        }
+
+        pub fn len(sa: SubArrayList(T)) usize {
+            std.debug.assert(sa.base.items.len >= sa.start);
+            return sa.base.items.len - sa.start;
+        }
+
+        pub fn append(sa: SubArrayList(T), item: T) !void {
+            return try sa.base.append(item);
+        }
+
+        pub fn constSlice(sa: SubArrayList(T)) []const T {
+            return sa.base.items[sa.start..];
+        }
+
+        pub fn pop(sa: SubArrayList(T)) ?T {
+            return if (sa.base.items.len > sa.start) sa.base.pop() else null;
+        }
+    };
+}
+
+fn refArray(p: *Parser) SubArrayList(Node.Ref) {
+    return .{
+        .base = &p.scratch_ref,
+        .start = p.scratch_ref.items.len,
+    };
+}
+
+fn rangeArray(p: *Parser) SubArrayList(Node.Range) {
+    return .{
+        .base = &p.scratch_range,
+        .start = p.scratch_range.items.len,
+    };
+}
 
 pub fn init(cc: *Compile, options: Options) !Parser {
     return .{
@@ -40,6 +88,8 @@ pub fn init(cc: *Compile, options: Options) !Parser {
         .forward_decl_table = .init(cc.allocator),
         .ole_auto_types = .init(cc.allocator),
         .options = options,
+        .scratch_ref = .init(cc.allocator),
+        .scratch_range = .init(cc.allocator),
     };
 }
 
@@ -47,10 +97,6 @@ const Options = struct {
     skip_imports: bool = false,
     show_failed_optional_parses: bool = false,
 };
-
-const max_array_size = 512;
-const IndexArray = std.BoundedArray(Node.Ref, max_array_size);
-const RangeArray = std.BoundedArray(Node.Range, max_array_size);
 
 pub const Error = error{ Overflow, OutOfMemory, ParseError, ImportError };
 
@@ -102,6 +148,12 @@ fn importSymbols(p: *Parser, import_filename: []const u8) Error!?Node.Ref {
         i += 1;
         if (tok.tag == .eof) break;
     }
+
+    // TODO: We need to actually codegen and then parse symbols. An example is unknwnbase.idl, which defines the
+    // base IUknknown type via cpp_quote. The current resolution method simply sees the cpp_quote's, which are ignored
+    // so the AddRef, Release methods are never seen.
+    //
+    // Either fully generate then parse (parse twice), or resolve cpp_quote (more hackish).
     return p.parse(pp_bytes, token_list.items) catch |err| {
         log.err("failed to parse import {s}: {s}", .{ import_filename, @errorName(err) });
         return error.ImportError;
@@ -189,7 +241,9 @@ fn parseRoot(p: *Parser) Error!Node.Ref {
 //      / Statement
 //      / DeclBlock
 fn parseGlobalStatements(p: *Parser) Error!Node.Range {
-    var stmts = try IndexArray.init(0);
+    var stmts = p.refArray();
+    defer stmts.reset();
+
     while (p.peekToken().tag != .eof) {
         const attrs = try p.parseAttributes();
         const maybe_stmt = switch (p.peekToken().tag) {
@@ -250,7 +304,9 @@ fn parseGlobalStatements(p: *Parser) Error!Node.Range {
 //      / ImportLib
 //      / ImportDeclBlock
 fn parseImportStatements(p: *Parser) Error!Node.Range {
-    var stmts = try IndexArray.init(0);
+    var stmts = p.refArray();
+    defer stmts.reset();
+
     while (p.peekToken().tag != .eof) {
         const attrs = try p.parseAttributes();
         const maybe_stmt = switch (p.peekToken().tag) {
@@ -316,7 +372,8 @@ fn parseDeclBlock(p: *Parser) Error!Node.Ref {
 // DeclStatements <- DeclStatement*
 // DeclStatement <- KEYWORD_interface QualifiedType LARROW ParameterizedTypeArgs RARROW SEMICOLON
 fn parseDeclStatements(p: *Parser) Error!Node.Range {
-    var stmts = try IndexArray.init(0);
+    var stmts = p.refArray();
+    defer stmts.reset();
 
     while (p.peekToken().tag == .keyword_interface) {
         _ = try p.expectToken(.keyword_interface);
@@ -460,7 +517,9 @@ fn parseDispIntProps(p: *Parser) Error!Node.Range {
     _ = try p.expectToken(.keyword_properties);
     _ = try p.expectToken(.colon);
 
-    var props = try IndexArray.init(0);
+    var props = p.refArray();
+    defer props.reset();
+
     while (true) {
         const maybe_s_field = try p.optional(parseSField, Node.Ref);
         if (maybe_s_field) |s_field| {
@@ -477,7 +536,9 @@ fn parseDispIntMethods(p: *Parser) Error!Node.Range {
     _ = try p.expectToken(.keyword_methods);
     _ = try p.expectToken(.colon);
 
-    var props = try IndexArray.init(0);
+    var props = p.refArray();
+    defer props.reset();
+
     while (true) {
         const maybe_func_def = try p.optional(parseFuncDef, Node.Ref);
         if (maybe_func_def) |func_def| {
@@ -497,7 +558,8 @@ fn parseFuncDef(p: *Parser) Error!Node.Ref {
 
 // NamespaceDef <- KEYWORD_namespace IDENTIFIER (DOT IDENTIFIER)*
 fn parseNamespaceDef(p: *Parser) Error!Node.Range {
-    var stmts = try IndexArray.init(0); // TODO InternPool.Ref directly
+    var stmts = p.refArray();
+    defer stmts.reset();
 
     _ = try p.expectToken(.keyword_namespace);
     try stmts.append(try p.addNode(.{
@@ -542,7 +604,8 @@ fn parseModule(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
     }
 
     _ = try p.expectToken(.l_brace);
-    var ints = try IndexArray.init(0);
+    var ints = p.refArray();
+    defer ints.reset();
     while (p.peekToken().tag != .r_brace) {
         try ints.append(try p.parseStatement());
     }
@@ -567,7 +630,8 @@ fn parseCoClass(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
     }
 
     _ = try p.expectToken(.l_brace);
-    var ints = try IndexArray.init(0);
+    var ints = p.refArray();
+    defer ints.reset();
     while (p.peekToken().tag != .r_brace) {
         try ints.append(try p.parseClassInt());
     }
@@ -594,7 +658,8 @@ fn parseRuntimeClass(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
     const parents = try p.parseInherit();
 
     _ = try p.expectToken(.l_brace);
-    var ints = try IndexArray.init(0);
+    var ints = p.refArray();
+    defer ints.reset();
     while (p.peekToken().tag != .r_brace) {
         try ints.append(try p.parseClassInt());
     }
@@ -679,7 +744,8 @@ fn parseInterface(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
         null;
 
     _ = try p.expectToken(.l_brace);
-    var defs = try IndexArray.init(0);
+    var defs = p.refArray();
+    defer defs.reset();
     while (p.peekToken().tag != .r_brace) {
         try defs.append(try p.parseStatement());
     }
@@ -751,7 +817,8 @@ fn parseParameterizedTypeArg(p: *Parser) Error!Node.Ref {
 // QualifiedType <- NamespacePfx? TypeName
 // NamespacePfx <- IDENTIFIER DOT (IDENTIFIER DOT)*
 fn parseQualifiedType(p: *Parser) Error!Node.Ref {
-    var namespace = try IndexArray.init(0);
+    var namespace = p.refArray();
+    defer namespace.reset();
     try namespace.append(try p.parseTypeName()); // TODO: Not strictly a type, just an identifier
     while (p.eatToken(.period)) |_| {
         try namespace.append(try p.parseTypeName());
@@ -979,7 +1046,8 @@ fn parseAbstractDirectDeclarator(p: *Parser) Error!Node.Ref {
     const base = try p.parseAbstractDeclaratorNoDirect();
     _ = try p.expectToken(.r_paren);
 
-    var suffix = try IndexArray.init(0);
+    var suffix = p.refArray();
+    defer suffix.reset();
     while (true) {
         const maybe_direct_decl = blk: {
             switch (p.peekToken().tag) {
@@ -1034,7 +1102,8 @@ fn parseDirectDeclaratorGeneric(p: *Parser, comptime sub_rule: *const fn (p: *Pa
         break :blk declarator;
     };
 
-    var suffix = try IndexArray.init(0);
+    var suffix = p.refArray();
+    defer suffix.reset();
     while (true) {
         const maybe_direct_decl = blk: {
             switch (p.peekToken().tag) {
@@ -1082,7 +1151,8 @@ fn parseArray(p: *Parser) Error!Node.Ref {
 // ArgList <- Arg (COMMA Arg)*
 fn parseArgs(p: *Parser) Error!Node.Ref {
     var is_varargs = false;
-    var args = try IndexArray.init(0);
+    var args = p.refArray();
+    defer args.reset();
     while (true) {
         const arg = try p.parseArg();
         try args.append(arg);
@@ -1161,19 +1231,18 @@ fn parseArg(p: *Parser) Error!Node.Ref {
 fn parseAnyDeclarator(p: *Parser) Error!Node.Ref {
     if (p.eatToken(.asterisk)) |_| {
         const type_quals = try p.parseTypeQualList();
+        const decl = try p.optional(parseAnyDeclarator, Node.Ref);
         return p.addNode(.{ .any_declarator = .{
             .is_pointer = true,
             .type_quals = type_quals,
-            .decl = try p.parseAnyDeclarator(),
+            .decl = decl,
         } });
     }
     if (try p.parseCallConv()) |call_conv| {
+        const decl = try p.optional(parseAnyDeclarator, Node.Ref);
         return p.addNode(.{ .any_declarator = .{
             .call_conv = call_conv,
-            .decl = try p.optional(
-                parseAnyDeclarator,
-                Node.Ref,
-            ),
+            .decl = decl,
         } });
     }
     return p.addNode(.{ .any_declarator = .{
@@ -1251,12 +1320,13 @@ fn parseType(p: *Parser) Error!Node.Ref {
 // TypeQualifier <- KEYWORD_const
 // TypeQualList <- TypeQualifier*
 fn parseTypeQualList(p: *Parser) Error!?Node.Range {
-    var quals = try IndexArray.init(0);
+    var quals = p.refArray();
+    defer quals.reset();
     while (true) {
         if (p.eatToken(.keyword_const)) |_| {} else break;
         try quals.append(try p.addNode(.{ .type_qual = .@"const" }));
     }
-    return if (quals.len > 0) try p.addData(quals.constSlice()) else null;
+    return if (quals.len() > 0) try p.addData(quals.constSlice()) else null;
 }
 
 // UnqualifiedType
@@ -1400,7 +1470,8 @@ fn parseEnum(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
     }
 
     // Enums
-    var enums = try RangeArray.init(0);
+    var enums = p.rangeArray();
+    defer enums.reset();
     while (p.peekToken().tag != .r_brace) {
         const enum_list = try p.parseEnumList();
         try enums.append(enum_list);
@@ -1421,7 +1492,8 @@ fn parseEnum(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
 // EnumList <- Enum (COMMA Enum)*
 // TODO: This appears to allow a trailing comma. re-check other list rules.
 fn parseEnumList(p: *Parser) Error!Node.Range {
-    var fields = try IndexArray.init(0);
+    var fields = p.refArray();
+    defer fields.reset();
 
     while (true) {
         const field = try p.parseEnumField();
@@ -1463,7 +1535,8 @@ fn parseStruct(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
     }
 
     // Fields
-    var fields = try IndexArray.init(0);
+    var fields = p.refArray();
+    defer fields.reset();
     while (p.peekToken().tag != .r_brace) {
         const field = try p.parseField();
         try fields.append(field);
@@ -1533,6 +1606,22 @@ fn parseStructDecl(p: *Parser) Error!Node.Ref {
     } });
 }
 
+// Exprs <- Expr (COMMA Expr)*
+fn parseExprs(p: *Parser) Error!Node.Range {
+    var exprs = p.refArray();
+    defer exprs.reset();
+
+    while (true) {
+        const expr = try p.parseExpr();
+        try exprs.append(expr);
+        if (p.eatToken(.comma)) |_| {} else {
+            break;
+        }
+    }
+
+    return p.addData(exprs.constSlice());
+}
+
 // ExprConst <- Expr
 fn parseExprConst(p: *Parser) Error!Node.Ref {
     return p.addNode(.{
@@ -1595,7 +1684,8 @@ fn parseUnion(p: *Parser, attributes: ?Node.Range) Error!Node.Ref {
 
 // Cases <- Case*
 fn parseCases(p: *Parser) Error!Node.Range {
-    var cases = try IndexArray.init(0);
+    var cases = p.refArray();
+    defer cases.reset();
     while (try p.parseCase()) |case| {
         try cases.append(case);
     }
@@ -1648,7 +1738,8 @@ fn parseUnionField(p: *Parser) Error!Node.Ref {
 // NeUnionFields <- NeUnionField*
 // NeUnionField <- (SField / Attributes) SEMICOLON
 fn parseNeUnionFields(p: *Parser) Error!Node.Range {
-    var fields = try IndexArray.init(0);
+    var fields = p.refArray();
+    defer fields.reset();
     while (true) {
         if (try p.optional(parseSField, Node.Ref)) |s_field| {
             try fields.append(try p.addNode(.{ .union_field = .{
@@ -1974,12 +2065,13 @@ fn parseExprUnaryPrefix(p: *Parser) Error!Node.Ref {
 fn parseExprUnaryPostfix(p: *Parser) Error!Node.Ref {
     const expr = try p.parseExprPrimary();
 
-    var postfix_exprs = try IndexArray.init(0);
+    var postfix_exprs = p.refArray();
+    defer postfix_exprs.reset();
     while (try p.parseExprPostfix()) |postfix_expr| {
         try postfix_exprs.append(postfix_expr);
     }
 
-    if (postfix_exprs.len > 0) {
+    if (postfix_exprs.len() > 0) {
         return p.addError(.{ .todo = "parseExprUnaryPostfix: implement postfix expressions" });
     } else {
         return expr;
@@ -2109,7 +2201,8 @@ fn parseAbstractDeclarator(p: *Parser) Error!Node.Ref {
 // FunctionSpecifier <- KEYWORD_inline
 // TypeQualifier <- KEYWORD_const
 fn parseDeclSpecNoType(p: *Parser) Error!Node.Range {
-    var specs = try IndexArray.init(0);
+    var specs = p.refArray();
+    defer specs.reset();
     while (true) {
         const tag: Node.DeclSpec = switch (p.peekToken().tag) {
             .keyword_const => .@"const",
@@ -2205,7 +2298,8 @@ fn parseIntVersion(s: []const u8) !Node.IntVersion {
 // AttributeBlock <- LBRACKET AttributeList RBRACKET
 // AttributeList <- Attribute (COMMA Attribute?)*
 fn parseAttributes(p: *Parser) Error!?Node.Range {
-    var attrs = try IndexArray.init(0);
+    var attrs = p.refArray();
+    defer attrs.reset();
 
     while (p.eatToken(.l_bracket)) |_| {
         while (true) {
@@ -2217,7 +2311,7 @@ fn parseAttributes(p: *Parser) Error!?Node.Range {
             if (comma == null) return error.ParseError;
         }
     }
-    return if (attrs.len > 0) try p.addData(attrs.constSlice()) else null;
+    return if (attrs.len() > 0) try p.addData(attrs.constSlice()) else null;
 }
 
 // Attribute
@@ -2277,7 +2371,7 @@ fn parseAttributes(p: *Parser) Error!?Node.Range {
 //      / KEYWORD_ATTR_implicithandle LPAREN Arg RPAREN
 //      / KEYWORD_ATTR_in
 //      / KEYWORD_ATTR_inputsync
-//      / KEYWORD_ATTR_lengthis LPAREN Exprs? RPAREN
+//      / KEYWORD_ATTR_length_is LPAREN Exprs? RPAREN
 //      / KEYWORD_ATTR_lcid (LPAREN ExprIntConst RPAREN)?
 //      / KEYWORD_ATTR_licensed
 //      / KEYWORD_ATTR_local
@@ -2530,13 +2624,13 @@ fn parseAttribute(p: *Parser) Error!Node.Ref {
         => |tag| {
             _ = try p.expectToken(.l_paren);
             _ = p.eatToken(.comma); // size_is(,expr) happens somewhat often in practice so allow
-            const expr = try p.optional(parseExpr, Node.Ref);
+            const exprs = try p.optional(parseExprs, Node.Range);
             _ = try p.expectToken(.r_paren);
             return try p.addNode(.{
                 .attribute = @unionInit(
                     Node.Attribute,
                     @tagName(tag),
-                    expr,
+                    exprs,
                 ),
             });
         },
@@ -2663,7 +2757,8 @@ fn expectIdentifierRef(p: *Parser) Error!InternPool.Ref {
 }
 
 fn parseListOf(p: *Parser, func: fn (p: *Parser) Error!Node.Ref) Error!Node.Range {
-    var list = try IndexArray.init(0);
+    var list = p.refArray();
+    defer list.reset();
     while (true) {
         try list.append(try func(p));
 

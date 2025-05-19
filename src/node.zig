@@ -606,7 +606,7 @@ pub const Node = union(enum) {
         implicit_handle: Node.Ref, // .arg
         in,
         input_sync,
-        length_is: ?Node.Ref, // .exprs
+        length_is: ?Node.Range, // .exprs
         lcid: ?Node.Ref, // .expr_int_const
         licensed,
         local,
@@ -639,7 +639,7 @@ pub const Node = union(enum) {
         requestedit,
         restricted,
         retval,
-        size_is: ?Node.Ref, // .expr
+        size_is: ?Node.Range, // .expr
         source,
         static: Node.Ref, // StaticAttr
         strict_context_handle,

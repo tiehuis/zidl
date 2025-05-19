@@ -34,7 +34,7 @@ typedef struct IKEEXT_CERTIFICATE_AUTHENTICATION0_ {
         } __C89_NAMELESSSTRUCTNAME;
         IKEEXT_CERT_ROOT_CONFIG0 *inboundEnterpriseStoreConfig;
         IKEEXT_CERT_ROOT_CONFIG0 *inboundTrustedRootStoreConfig;
-    } __C89_NAMELESSUNIONNAME1;
+    } __C89_NAMELESSUNIONNAME;
     IKEEXT_CERT_CONFIG_TYPE outboundConfigType;
     __C89_NAMELESS union {
         __C89_NAMELESS struct {
@@ -43,9 +43,10 @@ typedef struct IKEEXT_CERTIFICATE_AUTHENTICATION0_ {
         } __C89_NAMELESSSTRUCTNAME;
         IKEEXT_CERT_ROOT_CONFIG0 *outboundEnterpriseStoreConfig;
         IKEEXT_CERT_ROOT_CONFIG0 *outboundTrustedRootStoreConfig;
-    } __C89_NAMELESSUNIONNAME2;
+    } __C89_NAMELESSUNIONNAME;
     UINT32 flags;
 } IKEEXT_CERTIFICATE_AUTHENTICATION0;
+
 /* Begin additional prototypes for all interfaces */
 
 
@@ -55,4 +56,4 @@ typedef struct IKEEXT_CERTIFICATE_AUTHENTICATION0_ {
 }
 #endif
 
-#endif /* __anonymous_struct_h */
+#endif /* __anonymous_struct_h__ */

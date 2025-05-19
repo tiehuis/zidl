@@ -27,7 +27,7 @@ extern "C" {
 
 typedef struct _GDI_OBJECT {
     DWORD ObjectType;
-    union __ZIDL_union_switch_generated_name_00000001 {
+    union __ZIDL_union_switch_generated_name_00000000 {
         wireHBITMAP hBitmap;
         wireHPALETTE hPalette;
         wireHGLOBAL hGeneric;
@@ -36,7 +36,7 @@ typedef struct _GDI_OBJECT {
 typedef struct _userSTGMEDIUM {
     struct _STGMEDIUM_UNION {
         DWORD tymed;
-        union __ZIDL_union_switch_generated_name_00000002 {
+        union __ZIDL_union_switch_generated_name_00000001 {
             wireHMETAFILEPICT hMetaFilePict;
             wireHENHMETAFILE hHEnhMetaFile;
             GDI_OBJECT *hGdiHandle;

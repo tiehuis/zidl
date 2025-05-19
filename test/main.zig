@@ -58,8 +58,7 @@ test "union_switch" {
 }
 
 test "anonymous_struct" {
-    // TODO: Need to consolidate on the __C89_NAMELESS vs. generated_name between different WIDL version.
-    //try expect("anonymous_struct");
+    try expect("anonymous_struct");
 }
 
 test "empty_attributes" {
@@ -67,7 +66,7 @@ test "empty_attributes" {
 }
 
 test "v1_enum" {
-    //try expect("v1_enum");
+    try expect("v1_enum");
 }
 
 test "typedef_multi" {
@@ -76,4 +75,24 @@ test "typedef_multi" {
 
 test "void" {
     try expect("void");
+}
+
+test "no_arg_name" {
+    try expect("no_arg_name");
+}
+
+test "dcommon" {
+    try expect("dcommon");
+}
+
+test "explicit_numbered_enum" {
+    try expect("explicitly_numbered_enum");
+}
+
+test "propget_propput" {
+    try expect("propget_propput");
+}
+
+test "size_is_multi_expr" {
+    try expect("size_is_multi_expr");
 }

@@ -25,7 +25,8 @@
 extern "C" {
 #endif
 
-const OLECHAR *COLE_DEFAULT_PRINCIPAL = (OLECHAR *) ((INT_PTR ) (-1));
+#define COLE_DEFAULT_PRINCIPAL ((OLECHAR *) ((INT_PTR ) (-1)))
+
 /* Begin additional prototypes for all interfaces */
 
 

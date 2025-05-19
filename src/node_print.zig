@@ -808,14 +808,17 @@ fn dumpAttribute(p: *const Parser, attr: Node.Attribute, indent: usize) void {
             }
         },
 
-        .size_is => |maybe_index| {
+        .length_is,
+        .size_is,
+        => |maybe_range| {
             print(p, "attribute: {s}\n", .{@tagName(attr)});
-            if (maybe_index) |index| {
-                dumpNodeInner(p, index, indent + 1);
+            if (maybe_range) |range| {
+                for (range.start..range.end) |i| {
+                    dumpNodeInner(p, p.data.items[i], indent + 1);
+                }
             }
         },
 
-        .length_is,
         .lcid,
         => |maybe_index| {
             print(p, "attribute: {s}\n", .{@tagName(attr)});

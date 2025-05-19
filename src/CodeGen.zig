@@ -274,16 +274,85 @@ fn genNode(cg: *CodeGen, node_index: Node.Ref, indent: usize) Error!void {
             try cg.genEnumDef(enum_def);
             try cg.print(";\n", .{});
         },
-        .importlib => {}, // TODO: Confirm
-        .decl => |decl| {
-            try cg.genType(decl.decl_spec);
-            if (decl.init_decl) |d| try cg.genType(d);
+        .struct_def => |struct_def| {
+            try cg.genStructDef(struct_def, .root);
             try cg.print(";\n", .{});
         },
+        .importlib => {}, // TODO: Confirm
+        .decl => |decl| try cg.genDecl(decl),
         else => {
             std.debug.print("unsupported node type: {s}\n", .{@tagName(node)});
             return error.UnexpectedNodeType;
         },
+    }
+}
+
+fn genDecl(cg: *CodeGen, decl: Node.Decl) !void {
+    // `const` declarations are mapped to defines
+    if (cg.isConstDecl(decl.decl_spec)) {
+        try cg.genConstDecl(decl);
+    } else {
+        try cg.genType(decl.decl_spec);
+        if (decl.init_decl) |d| try cg.genType(d);
+        try cg.print(";\n", .{});
+    }
+}
+
+fn isConstDecl(cg: *CodeGen, ref: Node.Ref) bool {
+    return switch (cg.nodes[ref.toInt()]) {
+        .decl => |decl| cg.isConstDecl(decl.decl_spec),
+        .decl_spec_type => |ds| {
+            if (ds.decl_specs.empty()) return false;
+            // Must start with const
+            return cg.isConstDecl(cg.data[ds.decl_specs.start]);
+        },
+        .decl_spec => |tag| switch (tag) {
+            .@"const" => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
+fn isFuncDecl(cg: *CodeGen, ref: Node.Ref) bool {
+    // ArgList => function
+    return switch (cg.nodes[ref.toInt()]) {
+        .decl => |decl| if (decl.init_decl) |init_decl| cg.isFuncDecl(init_decl) else false,
+        .init_declarator => |init_decl| cg.isFuncDecl(init_decl.declarator),
+        .any_declarator,
+        .declarator,
+        .abstract_declarator,
+        => |any_decl| if (any_decl.decl) |decl| cg.isFuncDecl(decl) else false,
+        .direct_decl => |direct_decl| {
+            for (direct_decl.suffix.start..direct_decl.suffix.end) |index| {
+                if (cg.isFuncDecl(cg.data[index])) return true;
+            }
+            return false;
+        },
+        .arg_list => {
+            return true;
+        },
+        else => {
+            //log.err("return false on node: ", .{});
+            //@import("node_print.zig").dumpNode(cg.parser, ref);
+            return false;
+        },
+    };
+}
+
+fn genConstDecl(cg: *CodeGen, decl: Node.Decl) !void {
+    std.debug.assert(cg.isConstDecl(decl.decl_spec));
+
+    if (decl.init_decl) |init_decl_ref| {
+        const init_decl: Node.InitDeclarator = try cg.nodeAs(init_decl_ref, .init_declarator);
+        try cg.print("#define ", .{});
+        try cg.genName(init_decl.declarator);
+        if (init_decl.expr) |expr| {
+            try cg.print(" (", .{});
+            try cg.genExpr(expr);
+            try cg.print(")", .{});
+        }
+        try cg.print("\n\n", .{});
     }
 }
 
@@ -319,6 +388,9 @@ fn genName(cg: *CodeGen, node_ref: Node.Ref) !void {
                 try cg.genName(ok);
             }
         },
+        .qualified_type => |ty| {
+            try cg.genName(ty.typename);
+        },
         .func_param => |func_param| {
             if (func_param.any_decl) |a| {
                 try cg.genName(a);
@@ -341,7 +413,7 @@ fn genName(cg: *CodeGen, node_ref: Node.Ref) !void {
             try cg.print("union {s}", .{cg.intern_pool.get(union_def.name.?).?});
         },
         else => {
-            std.debug.print("genType: unsupported node type: {s}\n", .{@tagName(node)});
+            std.debug.print("genName: unsupported node type: {s}\n", .{@tagName(node)});
             return error.UnexpectedNodeType;
         },
     }
@@ -351,7 +423,7 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
     const node = cg.nodes[node_ref.toInt()];
     switch (node) {
         .enum_def => |def| try cg.genEnumDef(def),
-        .struct_def => |def| try cg.genStructDef(def),
+        .struct_def => |def| try cg.genStructDef(def, .root),
         .array_def => |a| switch (a) {
             .empty => try cg.print("[]", .{}),
             .asterisk => try cg.print("[*]", .{}),
@@ -515,7 +587,7 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
             .s_field_optional => |mf| if (mf) |f| try cg.genType(f) else {},
         },
         .union_sfield => |sfield| switch (sfield) {
-            .struct_def => |sf| try cg.genType(sf.def),
+            .struct_def => |sf| try cg.genStructDef(cg.nodes[sf.def.toInt()].struct_def, .member),
             .default => |df| {
                 try cg.genType(df.decl_spec);
                 try cg.genType(df.declarator);
@@ -570,16 +642,25 @@ fn genExpr(cg: *CodeGen, node_ref: Node.Ref) !void {
             try cg.genExpr(p.arg1);
         },
         .expr_binary => |p| {
+            try cg.print("(", .{});
             try cg.genExpr(p.arg1);
             try cg.print(" {s} ", .{p.op.symbol()});
             try cg.genExpr(p.arg2);
+            try cg.print(")", .{});
         },
         .expr_ternary => |p| {
+            try cg.print("(", .{});
             try cg.genExpr(p.arg1);
             try cg.print(" ? ", .{});
             try cg.genExpr(p.arg2);
             try cg.print(" : ", .{});
             try cg.genExpr(p.arg3);
+            try cg.print(")", .{});
+        },
+        .sizeof => |s| {
+            try cg.print("sizeof(", .{});
+            try cg.genType(s.unqual_decl_spec);
+            try cg.print(")", .{});
         },
         else => {
             log.err("genExpr: unsupported node type: {s}\n", .{@tagName(node)});
@@ -608,7 +689,18 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
     // call_as(func) => this should not be generated
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
+    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
+        "get_"
+    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
+        "put_"
+    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
+        "putref_"
+    else
+        "";
+
     if (decl.init_decl) |init_decl| {
+        if (!cg.isFuncDecl(init_decl)) return;
+
         const id = try cg.nodeAs(init_decl, .init_declarator);
         const d = try cg.nodeAs(id.declarator, .declarator);
 
@@ -631,7 +723,7 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
                 }
             };
 
-            try cg.print("{s}", .{vfunc.prefix});
+            try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
             try cg.genType(dd.base); // Function Name
             try cg.print("(", .{});
             if (vfunc.args) {
@@ -693,6 +785,8 @@ fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!isize {
             .null,
             => error.CodeGenError,
         },
+        // TODO: Handle cast properly, need to be able to target a specific type
+        .cast => |e| cg.resolveConstExpr(e.expr),
         else => {
             log.err("resolveConstExpr: unsupported node {s}", .{@tagName(node)});
             return error.CodeGenError;
@@ -738,10 +832,8 @@ fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
     try cg.print("enum ", .{});
     try cg.genNameOrFallback(enum_def.name);
 
-    // v1_enum attribute is usually attached to the typedef and not the enum itself
-    // so needs to be passed through.
-    const is_v1_enum = false;
-    var last_enum_value: isize = 0;
+    // v1_enum attribute is attached to typedef, needs to be propagated through.
+    var next_enum_value: isize = 0;
 
     try cg.print(" {{\n", .{});
     for (enum_def.members.start..enum_def.members.end) |index| {
@@ -751,10 +843,11 @@ fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
         if (enum_field.expr) |expr| {
             try cg.print(" = ", .{});
             try cg.genExpr(expr);
-            last_enum_value = try cg.resolveConstExpr(expr);
-        } else if (is_v1_enum) {
-            try cg.print(" = {}", .{last_enum_value});
-            last_enum_value += 1;
+            next_enum_value = try cg.resolveConstExpr(expr);
+            next_enum_value += 1;
+        } else {
+            try cg.print(" = {}", .{next_enum_value});
+            next_enum_value += 1;
         }
         const last = index + 1 == enum_def.members.end;
         try cg.print("{s}\n", .{if (!last) "," else ""});
@@ -762,43 +855,59 @@ fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
     try cg.print("}}", .{});
 }
 
-fn genStructDef(cg: *CodeGen, struct_def: Node.StructDef) !void {
-    try cg.print("struct ", .{});
-    try cg.genNameOrFallback(struct_def.name);
+// TODO: Clean this up and merge with the union definition code if possible.
+fn genStructDef(cg: *CodeGen, struct_def: Node.StructDef, ty: enum { root, member }) !void {
+    switch (ty) {
+        .root => {
+            try cg.print("struct ", .{});
+            try cg.genNameOrFallback(struct_def.name);
+        },
+        .member => {
+            try cg.print("__C89_NAMELESS struct", .{});
+        },
+    }
 
     try cg.print(" {{\n", .{});
     for (struct_def.fields.start..struct_def.fields.end) |index| {
         cg.indent += 4;
         defer cg.indent -= 4;
 
-        try cg.printIndent(cg.indent);
         const sfield: Node.StructField = try cg.nodeAs(cg.data[index], .struct_field);
         switch (sfield.field) {
-            .@"union" => |ref| try cg.genType(ref),
+            .@"union" => |ref| {
+                try cg.printIndent(cg.indent);
+                try cg.genType(ref);
+                try cg.print(";\n", .{});
+            },
             .default => |node| {
-                try cg.genType(node.decl_spec);
                 for (node.struct_decl_list.start..node.struct_decl_list.end) |j| {
                     const struct_decl: Node.StructDecl = try cg.nodeAs(cg.data[j], .struct_decl);
+                    try cg.printIndent(cg.indent);
+                    try cg.genType(node.decl_spec);
                     try cg.genType(struct_decl.any_decl);
+                    try cg.print(";\n", .{});
                 }
             },
         }
-        try cg.print(";\n", .{});
     }
     try cg.printIndent(cg.indent);
     try cg.print("}}", .{});
+    if (ty == .member) {
+        // TODO: Handle multiple anonymous structs in one union
+        try cg.print(" __C89_NAMELESSSTRUCTNAME", .{});
+    }
 }
 
 fn genNameOrFallback(cg: *CodeGen, ref: ?InternPool.Ref) !void {
     if (ref) |name| {
         try cg.print("{s}", .{cg.intern_pool.get(name).?});
     } else {
-        cg.next_id += 1;
         try cg.print("__{s}_{s}_generated_name_{:08}", .{
             cg.options.program_identifier_short,
             cg.getFilenameNoSuffix(cg.options.source_filepath),
             cg.next_id,
         });
+        cg.next_id += 1;
     }
 }
 
@@ -831,7 +940,9 @@ fn genInterfaceTopLevel(cg: *CodeGen, interface: Node.InterfaceDef) Error!void {
                 try cg.print(";\n", .{});
             },
             .cpp_quote => |ref| try cg.genCppQuote(ref),
-            // TODO: const decl => #define
+            .decl => |decl| {
+                if (cg.isConstDecl(decl.decl_spec)) try cg.genConstDecl(decl);
+            },
             else => {},
         }
     }
@@ -872,6 +983,8 @@ fn genInterfaceClass(cg: *CodeGen, interface: Node.InterfaceDef, is_async: bool)
             .typedef,
             .cpp_quote,
             .struct_def,
+            .enum_def,
+            .union_def,
             => {},
             .import => unreachable,
             else => unreachable,
@@ -884,14 +997,11 @@ fn genInterfaceClass(cg: *CodeGen, interface: Node.InterfaceDef, is_async: bool)
     , .{});
 
     if (maybe_uuid) |uuid| {
-        const c = uuidComponents(uuid);
-
-        try cg.print(
-            \\#ifdef __CRT_UUID_DECL
-            \\__CRT_UUID_DECL({s}{s}, 0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02})
-            \\#endif
-            \\
-        , .{ prefix, typename, c._96, c._80, c._64, c._56, c._48, c._40, c._32, c._24, c._16, c._8, c._0 });
+        try cg.print("#ifdef __CRT_UUID_DECL\n", .{});
+        try cg.print("__CRT_UUID_DECL({s}{s}, ", .{ prefix, typename });
+        try cg.genUuidList(uuid);
+        try cg.print(")\n", .{});
+        try cg.print("#endif\n", .{});
     }
 }
 
@@ -946,10 +1056,20 @@ fn argListLen(cg: *CodeGen, range: Node.Range) usize {
     return 0;
 }
 
+fn isNamed(cg: *CodeGen, ref: Node.Ref) bool {
+    return switch (cg.nodes[ref.toInt()]) {
+        .func_param => |e| if (e.any_decl) |decl| cg.isNamed(decl) else false,
+        .any_declarator => |d| if (d.decl) |decl| cg.isNamed(decl) else false,
+        .direct_decl => true,
+        else => true,
+    };
+}
+
 fn genArgList(cg: *CodeGen, range: Node.Range, options: GenArgListOptions) !void {
     // `(void)` argument should not emit
     if (cg.argListLen(range) == 0) return;
 
+    var unnamed: u8 = 0;
     for (range.start..range.end) |i| {
         const al = try cg.nodeAs(cg.data[i], .arg_list);
         for (al.args.start..al.args.end) |j| {
@@ -959,6 +1079,13 @@ fn genArgList(cg: *CodeGen, range: Node.Range, options: GenArgListOptions) !void
                 try cg.genName(cg.data[j]);
             } else {
                 try cg.genType(cg.data[j]); // .func_param
+            }
+            if (!cg.isNamed(cg.data[j])) {
+                // TODO: Does not handle > 26 arguments.
+                // TODO: Does not handle named argument in the set.
+                std.debug.assert(unnamed <= 26);
+                try cg.print("{c}", .{'a' + unnamed});
+                unnamed += 1;
             }
             const last = j + 1 == al.args.end;
             try cg.print("{s}", .{if (!last) "," else ""});
@@ -975,7 +1102,18 @@ fn genCVtableFuncDef(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
     // call_as(func) => this should not be generated
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
+    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
+        "get_"
+    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
+        "put_"
+    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
+        "putref_"
+    else
+        "";
+
     if (decl.init_decl) |init_decl| {
+        if (!cg.isFuncDecl(init_decl)) return;
+
         const id = try cg.nodeAs(init_decl, .init_declarator);
         const d = try cg.nodeAs(id.declarator, .declarator);
 
@@ -998,7 +1136,7 @@ fn genCVtableFuncDef(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
                 }
             };
 
-            try cg.print("*{s}", .{func.prefix});
+            try cg.print("*{s}{s}", .{ func.prefix, func_prefix });
             try cg.genType(dd.base); // Function Name
             try cg.print(")", .{});
             try cg.print("(\n", .{});
@@ -1075,6 +1213,8 @@ fn genInterfaceCVtable(cg: *CodeGen, interface: Node.InterfaceDef, is_async: boo
                 .typedef,
                 .cpp_quote,
                 .struct_def,
+                .enum_def,
+                .union_def,
                 => {},
                 else => unreachable,
             }
@@ -1137,6 +1277,8 @@ fn genInterfaceCObjMacros(cg: *CodeGen, interface: Node.InterfaceDef, is_async: 
             .typedef,
             .cpp_quote,
             .struct_def,
+            .enum_def,
+            .union_def,
             => {},
             .import => unreachable,
             else => unreachable,
@@ -1185,6 +1327,8 @@ fn genInterfaceCInlineWrappers(cg: *CodeGen, interface: Node.InterfaceDef, is_as
             .typedef,
             .cpp_quote,
             .struct_def,
+            .enum_def,
+            .union_def,
             => {},
             .import => unreachable,
             else => unreachable,
@@ -1197,8 +1341,18 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
     const prefix = if (is_async) "Async" else "";
+    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
+        "get_"
+    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
+        "put_"
+    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
+        "putref_"
+    else
+        "";
 
     if (decl.init_decl) |init_decl| {
+        if (!cg.isFuncDecl(init_decl)) return;
+
         const id = try cg.nodeAs(init_decl, .init_declarator);
         const d = try cg.nodeAs(id.declarator, .declarator);
 
@@ -1218,7 +1372,7 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
                 for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
                 try cg.print(" ", .{});
             }
-            try cg.print("{s}{s}_{s}", .{ prefix, interface_name, func.prefix });
+            try cg.print("{s}{s}_{s}{s}", .{ prefix, interface_name, func.prefix, func_prefix });
             try cg.genType(dd.base); // Function Name
             try cg.print("({s}{s}* This", .{ prefix, interface_name });
             if (func.args) {
@@ -1231,7 +1385,7 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
             if (!cg.isVoidType(decl.decl_spec) or cg.pointerCount(id.declarator) != 0) {
                 try cg.print("return ", .{});
             }
-            try cg.print("This->lpVtbl->{s}", .{func.prefix});
+            try cg.print("This->lpVtbl->{s}{s}", .{ func.prefix, func_prefix });
             try cg.genType(dd.base);
             try cg.print("(This", .{});
             if (func.args) {
@@ -1249,8 +1403,18 @@ fn genCObjectMacro(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
     const prefix = if (is_async) "Async" else "";
+    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
+        "get_"
+    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
+        "put_"
+    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
+        "putref_"
+    else
+        "";
 
     if (decl.init_decl) |init_decl| {
+        if (!cg.isFuncDecl(init_decl)) return;
+
         const id = try cg.nodeAs(init_decl, .init_declarator);
         const d = try cg.nodeAs(id.declarator, .declarator);
 
@@ -1264,7 +1428,7 @@ fn genCObjectMacro(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is
                 }
             };
 
-            try cg.print("#define {s}{s}_{s}", .{ prefix, interface_name, func.prefix });
+            try cg.print("#define {s}{s}_{s}{s}", .{ prefix, interface_name, func.prefix, func_prefix });
             try cg.genType(dd.base); // Function Name
             try cg.print("(This", .{});
             if (func.args) {
@@ -1272,7 +1436,7 @@ fn genCObjectMacro(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is
                 try cg.genArgList(dd.suffix, .{ .only_name = true });
             }
             try cg.print(") ", .{});
-            try cg.print("(This)->lpVtbl->{s}", .{func.prefix});
+            try cg.print("(This)->lpVtbl->{s}{s}", .{ func.prefix, func_prefix });
             try cg.genType(dd.base);
             try cg.print("(This", .{});
             if (func.args) {
@@ -1360,11 +1524,9 @@ fn genInterfaceAttributes(cg: *CodeGen, interface: Node.InterfaceDef, is_async: 
         null;
 
     if (maybe_uuid) |uuid| {
-        const c = uuidComponents(uuid);
-        try cg.print(
-            \\DEFINE_GUID(IID_{s}{s}, 0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02});
-            \\
-        , .{ prefix, typename, c._96, c._80, c._64, c._56, c._48, c._40, c._32, c._24, c._16, c._8, c._0 });
+        try cg.print("DEFINE_GUID(IID_{s}{s}, ", .{ prefix, typename });
+        try cg.genUuidList(uuid);
+        try cg.print(");\n", .{});
     }
 }
 
@@ -1389,12 +1551,9 @@ fn genLibrary(cg: *CodeGen, library: Node.LibraryDef) Error!void {
     };
 
     if (maybe_uuid) |uuid| {
-        const c = uuidComponents(uuid);
-        try cg.print(
-            \\DEFINE_GUID(LIBID_{s}, 0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02});
-            \\
-            \\
-        , .{ typename, c._96, c._80, c._64, c._56, c._48, c._40, c._32, c._24, c._16, c._8, c._0 });
+        try cg.print("DEFINE_GUID(LIBID_{s}, ", .{typename});
+        try cg.genUuidList(uuid);
+        try cg.print(");\n\n", .{});
     }
 
     for (library.import_statements.start..library.import_statements.end) |index| {
@@ -1429,12 +1588,9 @@ fn genCoClass(cg: *CodeGen, coclass: Node.CoClassDef) !void {
     };
 
     if (maybe_uuid) |uuid| {
-        const c = uuidComponents(uuid);
-        try cg.print(
-            \\DEFINE_GUID(CLSID_{s}, 0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02});
-            \\
-            \\
-        , .{ typename, c._96, c._80, c._64, c._56, c._48, c._40, c._32, c._24, c._16, c._8, c._0 });
+        try cg.print("DEFINE_GUID(CLSID_{s}, ", .{typename});
+        try cg.genUuidList(uuid);
+        try cg.print(");\n\n", .{});
     }
 
     try cg.print("#ifdef __cplusplus\n", .{});
@@ -1447,14 +1603,11 @@ fn genCoClass(cg: *CodeGen, coclass: Node.CoClassDef) !void {
     try cg.print("{s};\n", .{typename});
 
     if (maybe_uuid) |uuid| {
-        const c = uuidComponents(uuid);
-
-        try cg.print(
-            \\#ifdef __CRT_UUID_DECL
-            \\__CRT_UUID_DECL({s}, 0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02})
-            \\#endif
-            \\
-        , .{ typename, c._96, c._80, c._64, c._56, c._48, c._40, c._32, c._24, c._16, c._8, c._0 });
+        try cg.print("#ifdef __CRT_UUID_DECL\n", .{});
+        try cg.print("__CRT_UUID_DECL({s}, ", .{typename});
+        try cg.genUuidList(uuid);
+        try cg.print(")\n", .{});
+        try cg.print("#endif\n", .{});
     }
 
     try cg.print("#endif\n\n", .{});
@@ -1468,6 +1621,13 @@ fn genInterface(cg: *CodeGen, interface: Node.InterfaceDef) Error!void {
             try cg.genInterfaceInternal(interface, true);
         }
     }
+}
+
+fn hasFuncDefinitions(cg: *CodeGen, interface: Node.InterfaceDef) bool {
+    for (interface.defs.start..interface.defs.end) |index| {
+        if (cg.isFuncDecl(cg.data[index])) return true;
+    }
+    return false;
 }
 
 fn genInterfaceInternal(cg: *CodeGen, interface: Node.InterfaceDef, is_async: bool) Error!void {
@@ -1486,27 +1646,31 @@ fn genInterfaceInternal(cg: *CodeGen, interface: Node.InterfaceDef, is_async: bo
 
     try cg.genInterfaceTopLevel(interface);
     try cg.genInterfaceAttributes(interface, is_async);
-    try cg.print("#if defined(__cplusplus) && !defined(CINTERFACE)\n", .{});
-    try cg.genInterfaceClass(interface, is_async);
-    try cg.print("#else\n", .{});
-    try cg.genInterfaceCVtable(interface, is_async);
-    try cg.print(
-        \\#ifdef COBJMACROS
-        \\#ifndef WIDL_C_INLINE_WRAPPERS
-        \\
-    , .{});
-    try cg.genInterfaceCObjMacros(interface, is_async);
-    try cg.print("#else\n", .{});
-    try cg.genInterfaceCInlineWrappers(interface, is_async);
-    try cg.print(
-        \\#endif
-        \\#endif
-        \\
-        \\#endif
-        \\
-        \\
-    , .{});
-    try cg.genInterfaceStubProxy(interface);
+    // TODO: This check is not sufficient. For example, interface_ref's result in this still being generated. Also
+    // need to consider parents, and inheriting without defining in child functions.
+    if (cg.hasFuncDefinitions(interface)) {
+        try cg.print("#if defined(__cplusplus) && !defined(CINTERFACE)\n", .{});
+        try cg.genInterfaceClass(interface, is_async);
+        try cg.print("#else\n", .{});
+        try cg.genInterfaceCVtable(interface, is_async);
+        try cg.print(
+            \\#ifdef COBJMACROS
+            \\#ifndef WIDL_C_INLINE_WRAPPERS
+            \\
+        , .{});
+        try cg.genInterfaceCObjMacros(interface, is_async);
+        try cg.print("#else\n", .{});
+        try cg.genInterfaceCInlineWrappers(interface, is_async);
+        try cg.print(
+            \\#endif
+            \\#endif
+            \\
+            \\#endif
+            \\
+            \\
+        , .{});
+        try cg.genInterfaceStubProxy(interface);
+    }
     try cg.print(
         \\#endif  /* __{s}{s}_INTERFACE_DEFINED__ */
         \\
@@ -1592,6 +1756,23 @@ fn makeHeaderFilename(buf: []u8, filepath: []const u8) ![]u8 {
     }
     @memcpy(buf[i..][0..2], ".h");
     return buf[0 .. 2 + i];
+}
+
+fn genUuidList(cg: *CodeGen, uuid: u128) !void {
+    const c = uuidComponents(uuid);
+    try cg.print("0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02}", .{
+        c._96,
+        c._80,
+        c._64,
+        c._56,
+        c._48,
+        c._40,
+        c._32,
+        c._24,
+        c._16,
+        c._8,
+        c._0,
+    });
 }
 
 // TODO: Put this somewhere else

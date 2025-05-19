@@ -1,0 +1,25 @@
+[
+local,
+object,
+odl,
+dual,
+oleautomation,
+uuid(65725580-9b5d-11d0-9bfe-00c04fc99c8e)
+]
+interface IXMLElementCollection
+{
+    [propput, id(DISPID_XMLELEMENTCOLLECTION_LENGTH)]
+    HRESULT length( [in] LONG v );
+
+    [propget, id(DISPID_XMLELEMENTCOLLECTION_LENGTH)]
+    HRESULT length( [retval, out] LONG *p );
+
+    [propget, id(DISPID_XMLELEMENTCOLLECTION_NEWENUM)]
+    HRESULT _newEnum( [retval, out] IUnknown ** ppUnk );
+
+    [id(DISPID_XMLELEMENTCOLLECTION_ITEM)]
+    HRESULT item(
+            [optional, in] VARIANT var1,
+            [optional, in] VARIANT var2,
+            [retval, out] IDispatch ** ppDisp );
+}

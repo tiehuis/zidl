@@ -1,0 +1,4 @@
+[object, uuid (06fb45c1-693c-4ea7-B79F-7a6a54d8def2), pointer_default (unique), hidden, restricted]
+interface IFrequencyMap {
+  HRESULT get_FrequencyMapping ([out] ULONG *ulCount,[out, size_is (1,*ulCount)] ULONG **ppulList);
+};
