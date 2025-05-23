@@ -28,6 +28,7 @@ pub const Options = struct {
     midl_version: tokenizer.MidlVersion = .midl2,
     include_paths: []const []const u8 = &.{},
     user_macros: []const u8 = "",
+    max_source_size: usize = 64 * 1024 * 1024, // 64MiB
 };
 
 const Output = union(enum) {

@@ -1,8 +1,6 @@
 const std = @import("std");
 const zidl = @import("zidl");
 
-const MiB = 1024 * 1024;
-
 const log = std.log.scoped(.main);
 
 const usage =
@@ -101,7 +99,7 @@ pub fn main() !void {
         options.include_paths = .{file_dir} ++ default_include_paths;
 
         var file = try std.fs.cwd().openFile(filename, .{});
-        const bytes = try file.readToEndAllocOptions(allocator, 128 * MiB, null, .@"64", 0);
+        const bytes = try file.readToEndAllocOptions(allocator, options.max_source_size, null, .@"64", 0);
         defer allocator.free(bytes);
 
         log.debug("load {s} ({})", .{ filename, std.fmt.fmtIntSizeDec(bytes.len) });

@@ -124,7 +124,7 @@ fn importSymbols(p: *Parser, import_filename: []const u8) Error!?Node.Ref {
         return error.ImportError;
     };
 
-    const bytes = file.readToEndAllocOptions(p.cc.allocator, 128 * 1024 * 1024, null, .@"64", 0) catch |err| {
+    const bytes = file.readToEndAllocOptions(p.cc.allocator, p.cc.options.max_source_size, null, .@"64", 0) catch |err| {
         log.err("failed to readFile: {s}", .{@errorName(err)});
         p.addError(.{ .import_read_file = import_filename }) catch {};
         return error.ImportError;
