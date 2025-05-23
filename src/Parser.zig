@@ -149,11 +149,6 @@ fn importSymbols(p: *Parser, import_filename: []const u8) Error!?Node.Ref {
         if (tok.tag == .eof) break;
     }
 
-    // TODO: We need to actually codegen and then parse symbols. An example is unknwnbase.idl, which defines the
-    // base IUknknown type via cpp_quote. The current resolution method simply sees the cpp_quote's, which are ignored
-    // so the AddRef, Release methods are never seen.
-    //
-    // Either fully generate then parse (parse twice), or resolve cpp_quote (more hackish).
     return p.parse(pp_bytes, token_list.items) catch |err| {
         log.err("failed to parse import {s}: {s}", .{ import_filename, @errorName(err) });
         return error.ImportError;
@@ -835,11 +830,10 @@ fn parseQualifiedType(p: *Parser) Error!Node.Ref {
 
 // TypeName <- IDENTIFIER / KnownType
 fn parseTypeName(p: *Parser) Error!Node.Ref {
-    // TODO: Lookup type table, pre-seed with default types.
     const maybe_type_tag = try p.parseBaseType();
     if (maybe_type_tag) |tag| {
         return p.addNode(.{
-            .type = p.intern_pool.intern(@tagName(tag)),
+            .base_type = tag,
         });
     }
 
@@ -1053,7 +1047,7 @@ fn parseAbstractDirectDeclarator(p: *Parser) Error!Node.Ref {
             switch (p.peekToken().tag) {
                 .l_paren => {
                     _ = try p.expectToken(.l_paren);
-                    const args = try p.optional(parseArgs, Node.Ref);
+                    const args = try p.parseArgs();
                     _ = try p.expectToken(.r_paren);
                     break :blk args;
                 },
@@ -1109,7 +1103,7 @@ fn parseDirectDeclaratorGeneric(p: *Parser, comptime sub_rule: *const fn (p: *Pa
             switch (p.peekToken().tag) {
                 .l_paren => {
                     _ = try p.expectToken(.l_paren);
-                    const args = try p.optional(parseArgs, Node.Ref);
+                    const args = try p.parseArgs();
                     _ = try p.expectToken(.r_paren);
                     break :blk args;
                 },
@@ -1149,15 +1143,16 @@ fn parseArray(p: *Parser) Error!Node.Ref {
 
 // Args <- ArgList / ArgList COMMA ELLIPSIS
 // ArgList <- Arg (COMMA Arg)*
+//
+// Always returns an .arg_list node. May be empty.
 fn parseArgs(p: *Parser) Error!Node.Ref {
     var is_varargs = false;
     var args = p.refArray();
     defer args.reset();
     while (true) {
-        const arg = try p.parseArg();
-        try args.append(arg);
+        const maybe_arg = try p.optional(parseArg, Node.Ref);
+        if (maybe_arg) |arg| try args.append(arg) else break;
         if (p.eatToken(.comma)) |_| {} else break;
-
         if (p.eatToken(.period_3)) |_| {
             is_varargs = true;
             break;
@@ -1439,7 +1434,7 @@ fn parseInt(p: *Parser) Error!?Node.BaseType.Tag {
             _ = p.eatToken(.keyword_hyper);
             return .i64;
         },
-        .keyword_char => .u8,
+        .keyword_char => .i8,
         .keyword___int32 => .i32,
         .keyword___int64 => .i64,
         .keyword___int3264 => .i3264,
@@ -2128,9 +2123,11 @@ fn parseExprPrimary(p: *Parser) Error!Node.Ref {
         .keyword_FALSE => try p.addNode(.{ .expr = .false }),
         .keyword_TRUE => try p.addNode(.{ .expr = .true }),
         .keyword_NULL => try p.addNode(.{ .expr = .null }),
-        .number_literal => try p.addNode(.{ .expr = .{
-            .number = p.intern(tok),
-        } }),
+        .number_literal => try p.addNode(.{
+            .expr = .{
+                .number = p.classifyNumberLiteral(tok) catch return error.ParseError,
+            },
+        }),
         .string_literal => try p.addNode(.{
             .expr = .{
                 .string = p.intern(tok), // TODO cut quotes off like p.expectStringLiteral
@@ -2803,6 +2800,19 @@ fn addError(p: *Parser, error_msg: Compile.Error.Message) Error {
         try p.cc.addError(.{ .message = error_msg, .context = .{ .token = token } });
     }
     return error.ParseError;
+}
+
+fn classifyNumberLiteral(p: *Parser, tok: Token) !Node.Number {
+    std.debug.assert(tok.tag == .number_literal);
+    const lit = p.getTokenString(tok);
+
+    if (std.mem.indexOfScalar(u8, lit, '.')) |_| {
+        return .{ .float = try std.fmt.parseFloat(f64, lit) };
+    } else if (std.mem.startsWith(u8, lit, "0x")) {
+        return .{ .hex_int = try std.fmt.parseInt(i64, lit[2..], 16) };
+    } else {
+        return .{ .int = try std.fmt.parseInt(i64, lit, 0) };
+    }
 }
 
 fn expectStringLiteral(p: *Parser) Error![]const u8 {

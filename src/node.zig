@@ -102,6 +102,12 @@ pub const Node = union(enum) {
     unqualified_decl_spec_type: DeclSpecType, // TODO: Make more distinct from decl_spec
     version: Version,
 
+    pub const Number = union(enum) {
+        int: i64,
+        hex_int: i64,
+        float: f64,
+    };
+
     pub const Array = union(enum) {
         empty,
         asterisk,
@@ -227,11 +233,41 @@ pub const Node = union(enum) {
     pub const Version = union(enum) {
         hex: u32,
         int: IntVersion,
+
+        pub fn format(
+            version: Version,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+
+            switch (version) {
+                .hex => |v| try writer.print("0x{x}", .{v}),
+                .int => |iv| try writer.print("{}", .{iv}),
+            }
+        }
     };
 
     pub const IntVersion = struct {
         major: u32,
         minor: ?u32 = null,
+
+        pub fn format(
+            version: IntVersion,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+
+            try writer.print("{}", .{version.major});
+            if (version.minor) |minor| {
+                try writer.print(".{}", .{minor});
+            }
+        }
     };
 
     pub const UnionDef = struct {
@@ -286,7 +322,7 @@ pub const Node = union(enum) {
         false,
         true,
         null,
-        number: InternPool.Ref, // TODO: Parse literal as float or integer
+        number: Number,
         string: InternPool.Ref,
         identifier: InternPool.Ref,
         expr: Node.Ref,
@@ -490,6 +526,31 @@ pub const Node = union(enum) {
                         .signed => .i3264,
                         .unsigned => .i3264,
                     },
+                };
+            }
+
+            pub fn symbol(tag: Tag) []const u8 {
+                return switch (tag) {
+                    .void,
+                    .wchar,
+                    .error_status_t,
+                    .handle_t,
+                    .float,
+                    .double,
+                    => |t| @tagName(t),
+
+                    .boolean => "boolean",
+                    .byte => "char",
+                    .i8 => "char",
+                    .u8 => "unsigned char",
+                    .i16 => "short",
+                    .u16 => "unsigned short",
+                    .i32 => "int",
+                    .u32 => "unsigned int",
+                    .i64 => "long",
+                    .u64 => "unsigned long",
+                    .i3264 => "ssize_t",
+                    .u3264 => "size_t",
                 };
             }
         };
@@ -776,120 +837,7 @@ pub const Node = union(enum) {
             ptr,
 
             pub fn get(str: []const u8) ?Tag {
-                const attributes = std.StaticStringMap(Attribute.Tag).initComptime(.{
-                    .{ "activatable", .activatable },
-                    .{ "aggregatable", .aggregatable },
-                    .{ "annotation", .annotation },
-                    .{ "appobject", .appobject },
-                    .{ "async", .@"async" },
-                    .{ "async_uuid", .async_uuid },
-                    .{ "auto_handle", .auto_handle },
-                    .{ "bindable", .broadcast },
-                    .{ "broadcast", .call_as },
-                    .{ "call_as", .call_as },
-                    .{ "case", .case },
-                    .{ "composable", .composable },
-                    .{ "comm_status", .comm_status },
-                    .{ "context_handle", .context_handle },
-                    .{ "context_handle_noserialize", .context_handle_noserialize },
-                    .{ "context_handle_serialize", .context_handle_serialize },
-                    .{ "contract", .contract },
-                    .{ "contractversion", .contractversion },
-                    .{ "control", .control },
-                    .{ "custom", .custom },
-                    .{ "decode", .decode },
-                    .{ "default", .default },
-                    .{ "defaultbind", .defaultbind },
-                    .{ "defaultcollelem", .defaultcollelem },
-                    .{ "defaultvalue", .defaultvalue },
-                    .{ "defaultvtable", .defaultvtable },
-                    .{ "deprecated", .deprecated },
-                    .{ "disable_consistency_check", .disable_consistency_check },
-                    .{ "displaybind", .displaybind },
-                    .{ "dllname", .dllname },
-                    .{ "dual", .dual },
-                    .{ "enable_allocate", .enable_allocate },
-                    .{ "encode", .encode },
-                    .{ "endpoint", .endpoint },
-                    .{ "entry", .entry },
-                    .{ "event_add", .event_add },
-                    .{ "event_remove", .event_remove },
-                    .{ "exclusiveto", .exclusiveto },
-                    .{ "explcit_handle", .explcit_handle },
-                    .{ "fault_status", .fault_status },
-                    .{ "force_allocate", .force_allocate },
-                    .{ "handle", .handle },
-                    .{ "helpcontext", .helpcontext },
-                    .{ "helpfile", .helpfile },
-                    .{ "helpstring", .helpstring },
-                    .{ "helpstringcontext", .helpstringcontext },
-                    .{ "helpstringdll", .helpstringdll },
-                    .{ "hidden", .hidden },
-                    .{ "id", .id },
-                    .{ "idempotent", .idempotent },
-                    .{ "ignore", .ignore },
-                    .{ "iid_is", .iid_is },
-                    .{ "immediatebind", .immediatebind },
-                    .{ "implicit_handle", .implicit_handle },
-                    .{ "in", .in },
-                    .{ "input_sync", .input_sync },
-                    .{ "length_is", .length_is },
-                    .{ "lcid", .lcid },
-                    .{ "licensed", .licensed },
-                    .{ "local", .local },
-                    .{ "marshaling_behavior", .marshaling_behavior },
-                    .{ "maybe", .maybe },
-                    .{ "message", .message },
-                    .{ "nocode", .nocode },
-                    .{ "nonbrowable", .nonbrowable },
-                    .{ "noncreatable", .noncreatable },
-                    .{ "nonextensible", .nonextensible },
-                    .{ "notify", .notify },
-                    .{ "notify_flag", .notify_flag },
-                    .{ "object", .object },
-                    .{ "odl", .odl },
-                    .{ "oleautomation", .oleautomation },
-                    .{ "optimize", .optimize },
-                    .{ "optional", .optional },
-                    .{ "out", .out },
-                    .{ "partial_ignore", .partial_ignore },
-                    .{ "pointer_default", .pointer_default },
-                    .{ "progid", .progid },
-                    .{ "propget", .propget },
-                    .{ "propput", .propput },
-                    .{ "propputref", .propputref },
-                    .{ "proxy", .proxy },
-                    .{ "public", .public },
-                    .{ "range", .range },
-                    .{ "readonly", .readonly },
-                    .{ "represent_as", .represent_as },
-                    .{ "requestedit", .requestedit },
-                    .{ "restricted", .restricted },
-                    .{ "retval", .retval },
-                    .{ "size_is", .size_is },
-                    .{ "source", .source },
-                    .{ "static", .static },
-                    .{ "strict_context_handle", .strict_context_handle },
-                    .{ "string", .string },
-                    .{ "switch_is", .switch_is },
-                    .{ "switch_type", .switch_type },
-                    .{ "transmit_as", .transmit_as },
-                    .{ "threading", .threading },
-                    .{ "uidefault", .uidefault },
-                    .{ "usesgetlasterror", .usesgetlasterror },
-                    .{ "user_marshal", .user_marshal },
-                    .{ "uuid", .uuid },
-                    .{ "v1_enum", .v1_enum },
-                    .{ "vararg", .vararg },
-                    .{ "version", .version },
-                    .{ "vi_progid", .vi_progid },
-                    .{ "wire_marshal", .wire_marshal },
-                    // PointerType
-                    .{ "ref", .ref },
-                    .{ "unique", .unique },
-                    .{ "ptr", .ptr },
-                });
-                return attributes.get(str);
+                return std.meta.stringToEnum(Tag, str);
             }
         };
     };
@@ -902,14 +850,7 @@ pub const Node = union(enum) {
         both,
 
         pub fn get(str: []const u8) ?ThreadingType {
-            const threading_types = std.StaticStringMap(ThreadingType).initComptime(.{
-                .{ "apartment", .apartment },
-                .{ "neutral", .neutral },
-                .{ "single", .single },
-                .{ "free", .free },
-                .{ "both", .both },
-            });
-            return threading_types.get(str);
+            return std.meta.stringToEnum(ThreadingType, str);
         }
     };
 
@@ -919,12 +860,7 @@ pub const Node = union(enum) {
         ptr,
 
         pub fn get(str: []const u8) ?PointerType {
-            const pointer_types = std.StaticStringMap(PointerType).initComptime(.{
-                .{ "ref", .ref },
-                .{ "unique", .unique },
-                .{ "ptr", .ptr },
-            });
-            return pointer_types.get(str);
+            return std.meta.stringToEnum(PointerType, str);
         }
     };
 
@@ -935,13 +871,7 @@ pub const Node = union(enum) {
         pascal,
 
         pub fn get(str: []const u8) ?CallConv {
-            const pointer_types = std.StaticStringMap(PointerType).initComptime(.{
-                .{ "stdcall", .stdcall },
-                .{ "fastcall", .fastcall },
-                .{ "cdecl", .cdecl },
-                .{ "pascal", .pascal },
-            });
-            return pointer_types.get(str);
+            return std.meta.stringToEnum(CallConv, str);
         }
     };
 
@@ -951,12 +881,7 @@ pub const Node = union(enum) {
         standard,
 
         pub fn get(str: []const u8) ?MarshalingBehavior {
-            const marshaling_behavior_types = std.StaticStringMap(MarshalingBehavior).initComptime(.{
-                .{ "none", .none },
-                .{ "agile", .agile },
-                .{ "standard", .standard },
-            });
-            return marshaling_behavior_types.get(str);
+            return std.meta.stringToEnum(MarshalingBehavior, str);
         }
     };
 
@@ -972,18 +897,7 @@ pub const Node = union(enum) {
         VARIANT_BOOL,
 
         pub fn get(str: []const u8) ?OleAutoType {
-            const ole_auto_types = std.StaticStringMap(OleAutoType).initComptime(.{
-                .{ "BSTR", .BSTR },
-                .{ "CURRENCY", .CURRENCY },
-                .{ "DATE", .DATE },
-                .{ "DECIMAL", .DECIMAL },
-                .{ "HWND", .HWND },
-                .{ "LPSTR", .LPSTR },
-                .{ "SCORE", .SCORE },
-                .{ "VARIANT", .VARIANT },
-                .{ "VARIANT_BOOL", .VARIANT_BOOL },
-            });
-            return ole_auto_types.get(str);
+            return std.meta.stringToEnum(OleAutoType, str);
         }
     };
 };

@@ -1,0 +1,3 @@
+typedef unsigned int a;
+typedef char b;
+typedef double c;

@@ -27,16 +27,16 @@ extern "C" {
 
 #if 0
 typedef struct __ZIDL_dcommon_generated_name_00000000 {
-    i32 x;
-    i32 y;
+    int x;
+    int y;
 } POINT;
 typedef struct __ZIDL_dcommon_generated_name_00000001 {
-    i32 left;
-    i32 top;
-    i32 right;
-    i32 bottom;
+    int left;
+    int top;
+    int right;
+    int bottom;
 } RECT;
-typedef u32 UINT32;
+typedef unsigned int UINT32;
 #endif
 typedef enum DWRITE_MEASURING_MODE {
     DWRITE_MEASURING_MODE_NATURAL = 0,

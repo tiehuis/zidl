@@ -96,3 +96,15 @@ test "propget_propput" {
 test "size_is_multi_expr" {
     try expect("size_is_multi_expr");
 }
+
+test "empty_arg_list" {
+    try expect("empty_arg_list");
+}
+
+test "version" {
+    try expect("version");
+}
+
+test "base_type" {
+    try expect("base_type");
+}

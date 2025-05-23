@@ -1,0 +1,3 @@
+[uuid (B1BEA154-1c2f-4da9-9abf-6e2d24eea1be), version (0.1), pointer_default (unique)]
+interface IWinTypesBase {
+}

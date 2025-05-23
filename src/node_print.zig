@@ -190,7 +190,12 @@ fn dumpNodeInner(p: *const Parser, node_index: Node.Ref, indent: usize) void {
                 .false => print(p, "false\n", .{}),
                 .true => print(p, "true\n", .{}),
                 .null => print(p, "null\n", .{}),
-                .number, .string, .identifier => |ref| print(p, "{s}({s})\n", .{
+                .number => |n| switch (n) {
+                    .hex_int => |v| print(p, "0x{x}\n", .{v}),
+                    .int => |v| print(p, "{}\n", .{v}),
+                    .float => |v| print(p, "{}\n", .{v}),
+                },
+                .string, .identifier => |ref| print(p, "{s}({s})\n", .{
                     @tagName(expr), p.intern_pool.get(ref).?,
                 }),
                 .expr => |index| dumpNodeInner(p, index, indent),

@@ -378,6 +378,9 @@ fn genCppQuote(cg: *CodeGen, ref: InternPool.Ref) !void {
 fn genName(cg: *CodeGen, node_ref: Node.Ref) !void {
     const node = cg.nodes[node_ref.toInt()];
     switch (node) {
+        .base_type => |tag| {
+            try cg.print("{s}", .{tag.symbol()});
+        },
         .type => |ref| {
             try cg.print("{s}", .{cg.intern_pool.get(ref).?});
         },
@@ -464,8 +467,7 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
             try cg.print("{s}", .{@tagName(decl_spec)});
         },
         .base_type => |tag| {
-            // TODO: render base type
-            try cg.print("{s}", .{@tagName(tag)});
+            try cg.print("{s}", .{tag.symbol()});
         },
         .known_type,
         .type,
@@ -629,8 +631,13 @@ fn genExpr(cg: *CodeGen, node_ref: Node.Ref) !void {
                 .null => try cg.print("NULL", .{}),
                 .expr => |e| try cg.genExpr(e),
 
+                .number => |n| switch (n) {
+                    .hex_int => |v| try cg.print("0x{x}", .{v}),
+                    .int => |v| try cg.print("{}", .{v}),
+                    .float => |v| try cg.print("{}", .{v}),
+                },
+
                 inline .identifier,
-                .number,
                 .string,
                 => |ref| {
                     try cg.print("{s}", .{cg.intern_pool.get(ref).?});
@@ -771,11 +778,9 @@ fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!isize {
         .expr => |e| switch (e) {
             .false => 0,
             .true => 1,
-            .number => |n| {
-                // TODO: Currently for enums, float doesn't make sense but will
-                // need to handle this (return a tagged union).
-                const lit = cg.intern_pool.get(n).?;
-                return std.fmt.parseInt(isize, lit, 0) catch return error.CodeGenError;
+            .number => |n| switch (n) {
+                inline .hex_int, .int => |v| v,
+                .float => |v| @intFromFloat(v), // TODO: Only handle enum right now, need to change
             },
             .expr => |ev| try cg.resolveConstExpr(ev),
             // TODO: May need to handle constant symbols
@@ -1633,16 +1638,41 @@ fn hasFuncDefinitions(cg: *CodeGen, interface: Node.InterfaceDef) bool {
 fn genInterfaceInternal(cg: *CodeGen, interface: Node.InterfaceDef, is_async: bool) Error!void {
     const typename = cg.intern_pool.get(try cg.nodeAs(interface.name, .type)).?;
     const prefix = if (is_async) "Async" else "";
+    const version = if (try cg.getAttribute(interface.attributes, .version)) |v|
+        cg.nodes[v.version.toInt()].version
+    else
+        null;
 
     try cg.print(
         \\/*****************************************************************************
         \\ * {0s}{1s} interface
+    , .{ prefix, typename });
+    if (version) |v| {
+        try cg.print(" (v{})\n", .{v});
+    } else {
+        try cg.print("\n", .{});
+    }
+    try cg.print(
         \\ */
         \\#ifndef __{0s}{1s}_INTERFACE_DEFINED__
         \\#define __{0s}{1s}_INTERFACE_DEFINED__
         \\
         \\
     , .{ prefix, typename });
+
+    if (version) |v| {
+        var version_buf: [64]u8 = undefined;
+        const version_str = std.fmt.bufPrint(&version_buf, "{}", .{v}) catch return error.IoError;
+        for (version_str) |*c| {
+            if (c.* == '.') c.* = '_';
+        }
+        try cg.print(
+            \\extern RPC_IF_HANDLE {0s}{1s}_v{2s}_c_ifspec;
+            \\extern RPC_IF_HANDLE {0s}{1s}_v{2s}_s_ifspec;
+            \\
+            \\
+        , .{ prefix, typename, version_str });
+    }
 
     try cg.genInterfaceTopLevel(interface);
     try cg.genInterfaceAttributes(interface, is_async);
