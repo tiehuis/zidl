@@ -13,16 +13,16 @@ const usage =
     \\  -v, --version   Print zidl version.
     \\
     \\Compile options:
-    \\  --winrt                         Use midl3.0 (default midl2.0)
-    \\  --skip-imports                  Don't parse imported files
-    \\  --stacktrace                    Render a stacktrace on parse error
-    \\  --log-level debug|info|warn|err Print all log messages less than requested level
     \\  -D<macro>=<value>               Define a macro for the C preprocessor
+    \\  --winrt                         Use midl3.0 (default midl2.0)
+    \\  --log-level debug|info|warn|err Print all log messages less than requested level
+    \\  --stacktrace                    Render a stacktrace on parse error
     \\
     \\Debug options:
-    \\  --tokens                        Print a list of tokens produced by the tokenizer
-    \\  --codegen                       Perform codegen step (default: true)
-    \\  --show-failed-optional-parses   Render all parsing failures for optional rules
+    \\  --debug-tokens                  Print a list of tokens produced by the tokenizer
+    \\  --debug-ast                     Print an ast representation
+    \\  --debug-parser                  Render all parsing failures for optional rules
+    \\  --debug-skip-imports            Don't parse imported files
     \\
 ;
 
@@ -57,25 +57,11 @@ pub fn main() !void {
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         if (std.mem.startsWith(u8, args[i], "-")) {
-            if (std.mem.eql(u8, args[i], "--ast")) {
-                options.show_ast = true;
-            } else if (std.mem.eql(u8, args[i], "-h") or std.mem.eql(u8, args[i], "--help")) {
+            if (std.mem.eql(u8, args[i], "-h") or std.mem.eql(u8, args[i], "--help")) {
                 exitUsage(program_name);
             } else if (std.mem.eql(u8, args[i], "-v") or std.mem.eql(u8, args[i], "--version")) {
                 std.debug.print("zidl 1.0\n", .{});
                 std.process.exit(0);
-            } else if (std.mem.eql(u8, args[i], "--winrt")) {
-                options.midl_version = .midl3;
-            } else if (std.mem.eql(u8, args[i], "--tokens")) {
-                options.show_tokens = true;
-            } else if (std.mem.eql(u8, args[i], "--codegen")) {
-                options.codegen = true;
-            } else if (std.mem.eql(u8, args[i], "--skip-imports")) {
-                options.skip_imports = true;
-            } else if (std.mem.eql(u8, args[i], "--stacktrace")) {
-                show_stacktrace = true;
-            } else if (std.mem.eql(u8, args[i], "--show-failed-optional-parses")) {
-                options.show_failed_optional_parses = true;
             } else if (std.mem.eql(u8, args[i], "--log-level")) {
                 if (i + 1 >= args.len) exitUsage(program_name);
                 i += 1;
@@ -87,6 +73,18 @@ pub fn main() !void {
                 const define = args[i][2..];
                 try user_macros.appendSlice(define);
                 try user_macros.append('\n');
+            } else if (std.mem.eql(u8, args[i], "--winrt")) {
+                options.midl_version = .midl3;
+            } else if (std.mem.eql(u8, args[i], "--stacktrace")) {
+                show_stacktrace = true;
+            } else if (std.mem.eql(u8, args[i], "--debug-ast")) {
+                options.debug_ast = true;
+            } else if (std.mem.eql(u8, args[i], "--debug-tokens")) {
+                options.debug_tokens = true;
+            } else if (std.mem.eql(u8, args[i], "--debug-parser")) {
+                options.debug_parser = true;
+            } else if (std.mem.eql(u8, args[i], "--debug-skip-imports")) {
+                options.debug_skip_imports = true;
             } else {
                 log.err("unknown option: {s}\n", .{args[i]});
                 exitUsage(program_name);

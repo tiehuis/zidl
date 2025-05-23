@@ -19,6 +19,17 @@ errors: std.ArrayListUnmanaged(Error),
 output: Output,
 options: Options,
 
+pub const Options = struct {
+    debug_ast: bool = false,
+    debug_tokens: bool = false,
+    debug_parser: bool = false,
+    debug_skip_imports: bool = false,
+
+    midl_version: tokenizer.MidlVersion = .midl2,
+    include_paths: []const []const u8 = &.{},
+    user_macros: []const u8 = "",
+};
+
 const Output = union(enum) {
     file: std.fs.File,
     buffer: *std.ArrayList(u8),
@@ -53,22 +64,24 @@ pub fn print(cc: *Compile, comptime fmt: []const u8, args: anytype) !void {
 pub fn compile(cc: *Compile, filepath: []const u8, idl_content: [:0]const u8) !Node.Ref {
     var token_list = std.ArrayList(Token).init(cc.allocator);
     var t = Tokenizer.init(idl_content, .{ .version = cc.options.midl_version });
-    var i: usize = 0;
+
     while (true) {
         const tok = t.next();
         try token_list.append(tok);
-        if (cc.options.show_tokens) {
+        if (tok.tag == .eof) break;
+    }
+    log.debug("created {} tokens", .{token_list.items.len});
+
+    if (cc.options.debug_tokens) {
+        for (token_list.items, 0..) |tok, i| {
             std.debug.print("{}: ", .{i});
             t.dump(&tok);
         }
-        i += 1;
-        if (tok.tag == .eof) break;
     }
-    log.debug("created {} tokens", .{i});
 
     var parser = try Parser.init(cc, .{
-        .skip_imports = cc.options.skip_imports,
-        .show_failed_optional_parses = cc.options.show_failed_optional_parses,
+        .skip_imports = cc.options.debug_skip_imports,
+        .show_failed_optional_parses = cc.options.debug_parser,
     });
     const root_node_index = try parser.parse(idl_content, token_list.items);
 
@@ -76,16 +89,14 @@ pub fn compile(cc: *Compile, filepath: []const u8, idl_content: [:0]const u8) !N
     log.debug("created {} data nodes", .{parser.data.items.len});
     log.debug("created {} intern_pool entries", .{parser.intern_pool.count});
 
-    if (cc.options.show_ast) {
+    if (cc.options.debug_ast) {
         node_print.dumpNode(&parser, root_node_index);
     }
 
-    if (cc.options.codegen) {
-        var cg = CodeGen.init(cc, &parser, .{
-            .source_filepath = filepath,
-        });
-        try cg.gen();
-    }
+    var cg = CodeGen.init(cc, &parser, .{
+        .source_filepath = filepath,
+    });
+    try cg.gen();
 
     return root_node_index;
 }
@@ -126,18 +137,6 @@ pub fn preprocess(
     try pp.prettyPrintTokens(buf.writer(), .result_only);
     return cc.allocator.dupeZ(u8, buf.items);
 }
-
-pub const Options = struct {
-    show_ast: bool = false,
-    show_tokens: bool = false,
-    codegen: bool = true,
-    show_failed_optional_parses: bool = false,
-
-    midl_version: tokenizer.MidlVersion = .midl2,
-    skip_imports: bool = false,
-    include_paths: []const []const u8 = &.{},
-    user_macros: []const u8 = "",
-};
 
 pub const Error = struct {
     message: Message,
