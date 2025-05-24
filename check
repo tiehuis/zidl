@@ -11,7 +11,7 @@ file_h="${file_idl%.idl}.h"
 
 gen_h=$(mktemp)
 echo $gen_h
-./zig-out/bin/zidl "$file_idl" --log-level err &> "$gen_h"
+./zig-out/bin/zidl "$file_idl" --log-level err --stacktrace > "$gen_h"
 
 if diff -q "$file_h" "$gen_h" > /dev/null; then
   echo "Header match"
