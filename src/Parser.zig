@@ -2883,9 +2883,16 @@ fn addData(p: *Parser, n: []const Node.Ref) !Node.Range {
 // Given discontiguous ranges, merge them into a contiguous one. Not memory efficient, can improve later.
 fn addDataRanges(p: *Parser, ranges: []const Node.Range) !Node.Range {
     const start: u32 = @intCast(p.data.items.len);
+
     var total_len: u32 = 0;
     for (ranges) |range| {
         total_len += range.end - range.start;
+    }
+
+    // Resize upfront so we guarantee the slice we are appending is not invalidated.
+    try p.data.ensureTotalCapacity(start + total_len);
+
+    for (ranges) |range| {
         try p.data.appendSlice(p.data.items[range.start..range.end]);
     }
     return .{ .start = start, .end = start + total_len };
