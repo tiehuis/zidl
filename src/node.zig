@@ -17,8 +17,8 @@ pub const Node = union(enum) {
 
     // Reference to an external Node.Ref table (Parser.data).
     pub const Range = struct {
-        start: u32,
-        end: u32,
+        start: u32 = 0,
+        end: u32 = 0,
 
         pub fn empty(r: Range) bool {
             std.debug.assert(r.end >= r.start);

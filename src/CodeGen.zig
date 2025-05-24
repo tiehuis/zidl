@@ -261,7 +261,8 @@ fn genNode(cg: *CodeGen, node_index: Node.Ref, indent: usize) Error!void {
         .root => unreachable,
         .cpp_quote => |ref| try cg.genCppQuote(ref),
         .interface => |interface| try cg.genInterface(interface),
-        .interface_ref => |ref| try cg.genInterfaceRef(ref),
+        .disp_interface_def => |interface| try cg.genDispInterface(interface),
+        .disp_interface_ref, .interface_ref => |ref| try cg.genInterfaceRef(ref),
         .coclass_def => |coclass| try cg.genCoClass(coclass),
         .library_def => |library| try cg.genLibrary(library),
         .import => |ref| {
@@ -1618,6 +1619,25 @@ fn genCoClass(cg: *CodeGen, coclass: Node.CoClassDef) !void {
     }
 
     try cg.print("#endif\n\n", .{});
+}
+
+// A dispatch interface is similar to a standard interface, except it implies
+// inheritance of the IDispatch and IUknown interfaces. There are likely some
+// other details (esp around props/methods) but will get to that in future.
+fn genDispInterface(cg: *CodeGen, disp_interface: Node.DispInterfaceDef) Error!void {
+    //const ref_IDispatch = cg.parser.symbol_table.get("IDispatch") orelse return error.CodeGenError;
+    //const ref_IUnknown = cg.parser.symbol_table.get("IUnknown") orelse return error.CodeGenError;
+
+    const interface: Node.InterfaceDef = .{
+        .name = disp_interface.name,
+        .type_params = null,
+        .attributes = disp_interface.attributes,
+        .parents = null, //try cg.parser.addData(.{ ref_IDispatch, ref_IUnknown }),
+        .requires = null,
+        .defs = .{},
+    };
+
+    try cg.genInterface(interface);
 }
 
 fn genInterface(cg: *CodeGen, interface: Node.InterfaceDef) Error!void {
