@@ -1,0 +1,61 @@
+#!/bin/bash
+set -euo pipefail
+
+# Values < threshold are considered minor differences.
+# We expect small diffs on some files. Ideally just 1 (the auto-generated
+# header will differ) but for now, work on the larger diffs which typically
+# indicate missing codegen features.
+DIFF_THRESHOLD=20
+
+[[ $# -eq 1 && -d "$1" ]] || { echo "Usage: $0 <directory>"; exit 1; }
+
+match_count=0
+mismatch_count=0
+crash_count=0
+skipped_count=0
+total_count=0
+
+for idl_file in "$1"/*.idl; do
+  [[ -f "$idl_file" ]] || continue
+
+  file_h="${idl_file%.idl}.h"
+
+  if [[ ! -f "$file_h" ]]; then
+    echo "  ⏭️  Skipping $(basename "$idl_file"): no matching header"
+    ((skipped_count++))
+    continue
+  fi
+
+  ((total_count++))
+  echo "[$total_count] Processing: $(basename "$idl_file")"
+
+  gen_h=$(mktemp)
+  if ! ./zig-out/bin/zidl "$idl_file" --log-level err &> "$gen_h"; then
+    echo "  ❌ Crash during generation"
+    ((crash_count++))
+    rm "$gen_h"
+    continue
+  fi
+
+  diff_lines=$(diff -U 0 "$file_h" "$gen_h" | grep -cE '^(\+|\-)' || true)
+
+  if (( diff_lines < DIFF_THRESHOLD )); then
+    echo "  ✅ Minor difference ($diff_lines lines)"
+    ((match_count++))
+  else
+    echo "  ⚠️  Major difference ($diff_lines lines)"
+    ((mismatch_count++))
+  fi
+
+  rm "$gen_h"
+done
+
+echo
+echo "========= SUMMARY ========="
+echo "Total processed:  $total_count"
+echo "Skipped (no .h):  $skipped_count"
+echo "Minor diffs (<$DIFF_THRESHOLD): $match_count"
+echo "Major diffs (≥$DIFF_THRESHOLD): $mismatch_count"
+echo "Crashes:          $crash_count"
+echo "==========================="
+
