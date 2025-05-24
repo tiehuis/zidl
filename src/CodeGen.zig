@@ -406,14 +406,16 @@ fn genName(cg: *CodeGen, node_ref: Node.Ref) !void {
             try cg.genName(decl_spec_type.type);
         },
         .struct_def => |struct_def| {
-            // TODO: if empty, use generated name
-            try cg.print("struct {s}", .{cg.intern_pool.get(struct_def.name.?).?});
+            const name = if (struct_def.name) |name| cg.intern_pool.get(name).? else "(unnamed)";
+            try cg.print("struct {s}", .{name});
         },
         .enum_def => |enum_def| {
-            try cg.print("enum {s}", .{cg.intern_pool.get(enum_def.name.?).?});
+            const name = if (enum_def.name) |name| cg.intern_pool.get(name).? else "(unnamed)";
+            try cg.print("enum {s}", .{name});
         },
         .union_def => |union_def| {
-            try cg.print("union {s}", .{cg.intern_pool.get(union_def.name.?).?});
+            const name = if (union_def.name) |name| cg.intern_pool.get(name).? else "(unnamed)";
+            try cg.print("union {s}", .{name});
         },
         else => {
             std.debug.print("genName: unsupported node type: {s}\n", .{@tagName(node)});
