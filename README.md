@@ -7,14 +7,14 @@ the zig compiler.
 
 # Current status
 
-~27% passing or near passing.
+~31.6% passing or near passing.
 
 ```
 ./check-dir mingw-w64/mingw-w64-headers/include/
 Total processed:   316
 Skipped (no .h):   7
-Minor diffs (<20): 87
-Major diffs (≥20): 229
+Minor diffs (<20): 100
+Major diffs (≥20): 208
 Crashes:           0
 ```
 

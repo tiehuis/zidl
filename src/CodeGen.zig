@@ -475,7 +475,11 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
         .known_type,
         .type,
         => |ref| {
-            try cg.print("{s}", .{cg.intern_pool.get(ref).?});
+            var name = cg.intern_pool.get(ref).?;
+            if (std.mem.eql(u8, name, "BOOL")) {
+                name = "WINBOOL";
+            }
+            try cg.print("{s}", .{name});
         },
         .init_declarator => |init_decl| {
             try cg.genType(init_decl.declarator);

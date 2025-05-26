@@ -112,3 +112,7 @@ test "base_type" {
 test "hex_literal" {
     try expect("hex_literal");
 }
+
+test "rewrite_bool_to_winbool" {
+    try expect("rewrite_bool_to_winbool");
+}
