@@ -1,0 +1,13 @@
+typedef enum XmlError
+{
+    MX_E_MX = 0xc00cee00,
+    MX_E_INPUTEND,
+    MX_E_ENCODING,
+    MX_E_ENCODINGSWITCH,
+    MX_E_ENCODINGSIGNATURE,
+    WC_E_WC = 0xc00cee20,
+    WC_E_WHITESPACE,
+    WC_E_SEMICOLON,
+    WC_E_GREATERTHAN,
+    WC_E_QUOTE
+} XmlError;

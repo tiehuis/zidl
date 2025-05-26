@@ -757,7 +757,27 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
     }
 }
 
-fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!isize {
+const ConstVal = union(enum) {
+    hex_int: isize,
+    int: isize,
+
+    pub fn inc(a: ConstVal) ConstVal {
+        return switch (a) {
+            .hex_int => |e| .{ .hex_int = e + 1 },
+            .int => |e| .{ .int = e + 1 },
+        };
+    }
+
+    fn asInt(a: ConstVal) isize {
+        return switch (a) {
+            inline .hex_int,
+            .int,
+            => |v| v,
+        };
+    }
+};
+
+fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!ConstVal {
     const node = cg.nodes[expr.toInt()];
     return switch (node) {
         inline .expr_const,
@@ -765,31 +785,33 @@ fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!isize {
         => |sub_expr| try cg.resolveConstExpr(sub_expr),
         .expr_unary => |expr_unary| {
             const a = try cg.resolveConstExpr(expr_unary.arg1);
-            return try computeOp(expr_unary.op, a, null, null);
+            return .{ .int = try computeOp(expr_unary.op, a.asInt(), null, null) };
         },
         .expr_binary => |expr_binary| {
             const a = try cg.resolveConstExpr(expr_binary.arg1);
             const b = try cg.resolveConstExpr(expr_binary.arg2);
-            return try computeOp(expr_binary.op, a, b, null);
+            return .{ .int = try computeOp(expr_binary.op, a.asInt(), b.asInt(), null) };
         },
         .expr_ternary => |expr_ternary| {
             const a = try cg.resolveConstExpr(expr_ternary.arg1);
             const b = try cg.resolveConstExpr(expr_ternary.arg2);
             const c = try cg.resolveConstExpr(expr_ternary.arg3);
-            return try computeOp(expr_ternary.op, a, b, c);
+            return .{ .int = try computeOp(expr_ternary.op, a.asInt(), b.asInt(), c.asInt()) };
         },
         .expr => |e| switch (e) {
-            .false => 0,
-            .true => 1,
+            .false => .{ .int = 0 },
+            .true => .{ .int = 1 },
             .number => |n| switch (n) {
-                inline .hex_int, .int => |v| v,
-                .float => |v| @intFromFloat(v), // TODO: Only handle enum right now, need to change
+                .hex_int => |v| .{ .hex_int = v },
+                .int => |v| .{ .int = v },
+                // TODO: Better handle implicit coercion in const vals. Actually handle bits etc.
+                .float => |v| .{ .int = @intFromFloat(v) },
             },
             .expr => |ev| try cg.resolveConstExpr(ev),
             // TODO: May need to handle constant symbols
             .identifier,
             .string,
-            => 0,
+            => .{ .int = 0 },
             .null,
             => error.CodeGenError,
         },
@@ -841,7 +863,7 @@ fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
     try cg.genNameOrFallback(enum_def.name);
 
     // v1_enum attribute is attached to typedef, needs to be propagated through.
-    var next_enum_value: isize = 0;
+    var next_enum_value: ConstVal = .{ .int = 0 };
 
     try cg.print(" {{\n", .{});
     for (enum_def.members.start..enum_def.members.end) |index| {
@@ -852,10 +874,13 @@ fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
             try cg.print(" = ", .{});
             try cg.genExpr(expr);
             next_enum_value = try cg.resolveConstExpr(expr);
-            next_enum_value += 1;
+            next_enum_value = next_enum_value.inc();
         } else {
-            try cg.print(" = {}", .{next_enum_value});
-            next_enum_value += 1;
+            switch (next_enum_value) {
+                .hex_int => |v| try cg.print(" = 0x{x}", .{v}),
+                .int => |v| try cg.print(" = {}", .{v}),
+            }
+            next_enum_value = next_enum_value.inc();
         }
         const last = index + 1 == enum_def.members.end;
         try cg.print("{s}\n", .{if (!last) "," else ""});

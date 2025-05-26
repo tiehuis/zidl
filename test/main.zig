@@ -108,3 +108,7 @@ test "version" {
 test "base_type" {
     try expect("base_type");
 }
+
+test "hex_literal" {
+    try expect("hex_literal");
+}
