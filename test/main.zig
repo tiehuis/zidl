@@ -116,3 +116,7 @@ test "hex_literal" {
 test "rewrite_bool_to_winbool" {
     try expect("rewrite_bool_to_winbool");
 }
+
+test "long_literal" {
+    try expect("long_literal");
+}

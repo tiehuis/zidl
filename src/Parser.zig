@@ -2802,16 +2802,36 @@ fn addError(p: *Parser, error_msg: Compile.Error.Message) Error {
     return error.ParseError;
 }
 
+fn trimSuffix(lit: []const u8, suffixes: []const []const u8) []const u8 {
+    for (suffixes) |suffix| {
+        if (lit.len > suffix.len and std.ascii.eqlIgnoreCase(lit[lit.len - suffix.len ..], suffix)) {
+            return lit[0 .. lit.len - suffix.len];
+        }
+    }
+    return lit;
+}
+
+const float_suffixes: []const []const u8 = &.{
+    "dl", "dd", "df", "l", "f",
+};
+
+const int_suffixes: []const []const u8 = &.{
+    "ll", "lu", "l", "u",
+};
+
 fn classifyNumberLiteral(p: *Parser, tok: Token) !Node.Number {
     std.debug.assert(tok.tag == .number_literal);
     const lit = p.getTokenString(tok);
 
     if (std.mem.indexOfScalar(u8, lit, '.')) |_| {
-        return .{ .float = try std.fmt.parseFloat(f64, lit) };
+        const trimmed_lit = trimSuffix(lit, float_suffixes);
+        return .{ .float = try std.fmt.parseFloat(f64, trimmed_lit) };
     } else if (std.mem.startsWith(u8, lit, "0x")) {
-        return .{ .hex_int = try std.fmt.parseInt(i64, lit[2..], 16) };
+        const trimmed_lit = trimSuffix(lit, int_suffixes);
+        return .{ .hex_int = try std.fmt.parseInt(i64, trimmed_lit[2..], 16) };
     } else {
-        return .{ .int = try std.fmt.parseInt(i64, lit, 0) };
+        const trimmed_lit = trimSuffix(lit, int_suffixes);
+        return .{ .int = try std.fmt.parseInt(i64, trimmed_lit, 0) };
     }
 }
 
