@@ -416,8 +416,12 @@ fn parseImport(p: *Parser) Error!Node.Ref {
     // to recursively parse the same instances. Backfill as required.
     var entry_index: ?usize = null;
     const root_node_index = blk: {
-        for (p.import_table.items) |other| {
+        for (p.import_table.items, 0..) |other, i| {
             if (ref == other.import.subject) {
+                // Ensure imports from recursive imports are marked as coming from root if the
+                // root import is done after.
+                p.import_table.items[i].is_root = p.isRootState();
+
                 log.debug("reusing existing import node for {s}", .{import_name});
                 break :blk other.import.root;
             }
