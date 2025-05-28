@@ -426,13 +426,24 @@ fn genName(cg: *CodeGen, node_ref: Node.Ref) !void {
 }
 
 fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
+    return cg.genTypeContext(node_ref, .none);
+}
+
+const GenTypeContext = enum {
+    // No context specified, use default behaviour.
+    none,
+    // The GenType call originated from within a definition (e.g. a struct def).
+    def,
+};
+
+fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Error!void {
     const node = cg.nodes[node_ref.toInt()];
     switch (node) {
         .enum_def => |def| try cg.genEnumDef(def),
         .struct_def => |def| try cg.genStructDef(def, .root),
         .array_def => |a| switch (a) {
             .empty => try cg.print("[]", .{}),
-            .asterisk => try cg.print("[*]", .{}),
+            .asterisk => try cg.print("[{s}]", .{if (context == .def) "1" else ""}),
             .expr => |e| {
                 try cg.print("[", .{});
                 try cg.genExpr(e);
@@ -441,7 +452,7 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
         },
         .safe_array => |arr| {
             try cg.print("SAFEARRAY *", .{});
-            try cg.genType(arr);
+            try cg.genTypeContext(arr, context);
         },
         .enum_ref => |ref| {
             try cg.print("enum {s}", .{cg.intern_pool.get(ref).?});
@@ -451,19 +462,19 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
         },
         .qualified_type => |qual_type| {
             for (qual_type.namespace.start..qual_type.namespace.end) |index| {
-                try cg.genType(cg.data[index]);
+                try cg.genTypeContext(cg.data[index], context);
                 try cg.print(".", .{});
             }
-            try cg.genType(qual_type.typename);
+            try cg.genTypeContext(qual_type.typename, context);
         },
         .unqualified_decl_spec_type,
         .decl_spec_type,
         => |decl_spec| {
             for (decl_spec.decl_specs.start..decl_spec.decl_specs.end) |index| {
-                try cg.genType(cg.data[index]);
+                try cg.genTypeContext(cg.data[index], context);
                 try cg.print(" ", .{});
             }
-            try cg.genType(decl_spec.type);
+            try cg.genTypeContext(decl_spec.type, context);
             try cg.print(" ", .{});
         },
         .decl_spec => |decl_spec| {
@@ -482,7 +493,7 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
             try cg.print("{s}", .{name});
         },
         .init_declarator => |init_decl| {
-            try cg.genType(init_decl.declarator);
+            try cg.genTypeContext(init_decl.declarator, context);
             if (init_decl.expr) |expr| {
                 try cg.print(" = ", .{});
                 try cg.genExpr(expr);
@@ -498,19 +509,19 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
                 try cg.print("*", .{});
             }
             if (decl.decl) |ok| {
-                try cg.genType(ok);
+                try cg.genTypeContext(ok, context);
             }
         },
         .direct_decl => |direct_decl| {
-            try cg.genType(direct_decl.base);
+            try cg.genTypeContext(direct_decl.base, context);
             for (direct_decl.suffix.start..direct_decl.suffix.end) |index| {
-                try cg.genType(cg.data[index]);
+                try cg.genTypeContext(cg.data[index], context);
             }
         },
         .arg_list => |arg_list| {
             try cg.print("(\n", .{});
             for (arg_list.args.start..arg_list.args.end) |index| {
-                try cg.genType(cg.data[index]);
+                try cg.genTypeContext(cg.data[index], context);
                 try cg.print(",\n", .{});
             }
             if (arg_list.is_varargs) {
@@ -519,10 +530,10 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
             try cg.print(")", .{});
         },
         .func_param => |func_param| {
-            try cg.genType(func_param.decl_spec);
+            try cg.genTypeContext(func_param.decl_spec, context);
             // TODO: Handle attributes
             if (func_param.any_decl) |a| {
-                try cg.genType(a);
+                try cg.genTypeContext(a, context);
             }
         },
         .union_switch => |sw| {
@@ -531,7 +542,7 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
 
             // Tag
             try cg.printIndent(cg.indent + 4);
-            try cg.genType(sw.sfield);
+            try cg.genTypeContext(sw.sfield, context);
             try cg.print(";\n", .{});
             // Union
             try cg.printIndent(cg.indent + 4);
@@ -546,11 +557,11 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
                             .attributes => continue,
                             .s_field => |f| {
                                 try cg.printIndent(cg.indent + 8);
-                                try cg.genType(f);
+                                try cg.genTypeContext(f, context);
                             },
                             .s_field_optional => |mf| if (mf) |f| {
                                 try cg.printIndent(cg.indent + 8);
-                                try cg.genType(f);
+                                try cg.genTypeContext(f, context);
                             } else continue,
                         }
                     },
@@ -574,13 +585,13 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
                             cg.indent += 4;
                             defer cg.indent -= 4;
                             try cg.printIndent(cg.indent);
-                            try cg.genType(f);
+                            try cg.genTypeContext(f, context);
                         },
                         .s_field_optional => |mf| if (mf) |f| {
                             cg.indent += 4;
                             defer cg.indent -= 4;
                             try cg.printIndent(cg.indent);
-                            try cg.genType(f);
+                            try cg.genTypeContext(f, context);
                         } else continue,
                     },
                     else => unreachable,
@@ -592,14 +603,14 @@ fn genType(cg: *CodeGen, node_ref: Node.Ref) Error!void {
         },
         .union_field => |field| switch (field) {
             .attributes => unreachable,
-            .s_field => |f| try cg.genType(f),
-            .s_field_optional => |mf| if (mf) |f| try cg.genType(f) else {},
+            .s_field => |f| try cg.genTypeContext(f, context),
+            .s_field_optional => |mf| if (mf) |f| try cg.genTypeContext(f, context) else {},
         },
         .union_sfield => |sfield| switch (sfield) {
             .struct_def => |sf| try cg.genStructDef(cg.nodes[sf.def.toInt()].struct_def, .member),
             .default => |df| {
-                try cg.genType(df.decl_spec);
-                try cg.genType(df.declarator);
+                try cg.genTypeContext(df.decl_spec, context);
+                try cg.genTypeContext(df.declarator, context);
             },
         },
         else => {
@@ -719,15 +730,6 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
         const d = try cg.nodeAs(id.declarator, .declarator);
 
         for (if (is_async) func_gen_async else func_gen) |vfunc| {
-            try cg.printIndent(4);
-            try cg.print("virtual ", .{});
-            try cg.genType(decl.decl_spec); // Return Type
-            if (d.is_pointer) {
-                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
-                try cg.print(" ", .{});
-            }
-            if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
-
             const dd: Node.DirectDeclarator = blk: {
                 if (cg.nodeAs(d.decl.?, .declarator)) |de| {
                     if (de.call_conv) |cc| try cg.genCallConv(cc);
@@ -736,6 +738,94 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
                     break :blk try cg.nodeAs(d.decl.?, .direct_decl);
                 }
             };
+
+            // Clean this up, should share more logic. Probably should do an AST -> IR pass or at minimum clean
+            // up the AST so it is less generic.
+            const is_aggregate_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
+            if (is_aggregate_type) {
+                const aggregate_return_type = decl.decl_spec;
+                try cg.print("#ifdef WIDL_EXPLICIT_AGGREGATE_RETURNS\n", .{});
+                // Render virtual func
+                {
+                    try cg.printIndent(4);
+                    try cg.print("virtual ", .{});
+                    try cg.genType(aggregate_return_type); // Return Type
+                    std.debug.assert(!d.is_pointer); // Aggregate Type => not pointer
+                    try cg.print("* ", .{});
+                    if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+
+                    try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
+                    try cg.genType(dd.base); // Function Name
+                    try cg.print("(\n", .{});
+
+                    // Will always have an initial argument
+                    try cg.printIndent(8);
+                    try cg.genType(aggregate_return_type);
+                    try cg.print("*__ret", .{});
+                    if (vfunc.args and cg.argListLen(dd.suffix) != 0) {
+                        try cg.print(",", .{});
+                        try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
+                    }
+                    try cg.print(") = 0;\n", .{});
+                }
+
+                // Render non virtual proxy func
+                {
+                    try cg.printIndent(4);
+                    try cg.genType(aggregate_return_type); // Return Type
+                    if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+
+                    try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
+                    try cg.genType(dd.base); // Function Name
+                    try cg.print("(", .{});
+                    if (vfunc.args) {
+                        try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
+                        if (cg.argListLen(dd.suffix) == 0) {
+                            // WIDL renders empty cpp virtual decls as
+                            //
+                            // ```
+                            //    Function(
+                            //        );
+                            // ```
+                            try cg.print("\n", .{});
+                            try cg.printIndent(8);
+                        }
+                    } else {
+                        try cg.print("\n", .{});
+                        try cg.printIndent(8);
+                    }
+                    try cg.print(")\n", .{});
+
+                    // Body
+                    try cg.printIndent(4);
+                    try cg.print("{{\n", .{});
+                    try cg.printIndent(8);
+                    try cg.genType(aggregate_return_type);
+                    try cg.print("__ret;\n", .{});
+                    try cg.printIndent(8);
+                    try cg.print("return *", .{});
+                    try cg.genType(dd.base); // Function name
+                    try cg.print("(&__ret", .{});
+                    if (cg.argListLen(dd.suffix) != 0) {
+                        try cg.print(",", .{});
+                        try cg.genArgList(dd.suffix, .{ .split_args_by_line = false, .only_name = true });
+                    }
+                    try cg.print(");\n", .{});
+                    try cg.printIndent(4);
+                    try cg.print("}}\n", .{});
+                }
+
+                try cg.print("#else\n", .{});
+            }
+
+            try cg.printIndent(4);
+            try cg.print("virtual ", .{});
+            try cg.genType(decl.decl_spec); // Return Type
+            if (d.is_pointer) {
+                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
+                try cg.print(" ", .{});
+            }
+            if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
 
             try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
             try cg.genType(dd.base); // Function Name
@@ -756,7 +846,11 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
                 try cg.print("\n", .{});
                 try cg.printIndent(8);
             }
-            try cg.print(") = 0;\n\n", .{});
+            try cg.print(") = 0;\n", .{});
+            if (is_aggregate_type) {
+                try cg.print("#endif\n", .{});
+            }
+            try cg.print("\n", .{});
         }
     }
 }
@@ -862,6 +956,21 @@ fn computeOp(op: Node.Op, a: isize, b: ?isize, c: ?isize) !isize {
     };
 }
 
+fn isAggregateType(cg: *CodeGen, ref: Node.Ref) bool {
+    return switch (cg.nodes[ref.toInt()]) {
+        .decl_spec_type => |dt| cg.isAggregateType(dt.type),
+        .qualified_type => |qt| cg.isAggregateType(qt.typename),
+        .type => |t| {
+            const name = cg.intern_pool.get(t) orelse return false;
+            return if (cg.parser.symbol_table.get(name)) |def| switch (cg.nodes[def.toInt()]) {
+                .struct_def => true,
+                else => false,
+            } else false;
+        },
+        else => false,
+    };
+}
+
 fn genEnumDef(cg: *CodeGen, enum_def: Node.EnumDef) !void {
     try cg.print("enum ", .{});
     try cg.genNameOrFallback(enum_def.name);
@@ -913,15 +1022,15 @@ fn genStructDef(cg: *CodeGen, struct_def: Node.StructDef, ty: enum { root, membe
         switch (sfield.field) {
             .@"union" => |ref| {
                 try cg.printIndent(cg.indent);
-                try cg.genType(ref);
+                try cg.genTypeContext(ref, .def);
                 try cg.print(";\n", .{});
             },
             .default => |node| {
                 for (node.struct_decl_list.start..node.struct_decl_list.end) |j| {
                     const struct_decl: Node.StructDecl = try cg.nodeAs(cg.data[j], .struct_decl);
                     try cg.printIndent(cg.indent);
-                    try cg.genType(node.decl_spec);
-                    try cg.genType(struct_decl.any_decl);
+                    try cg.genTypeContext(node.decl_spec, .def);
+                    try cg.genTypeContext(struct_decl.any_decl, .def);
                     try cg.print(";\n", .{});
                 }
             },
@@ -1155,8 +1264,13 @@ fn genCVtableFuncDef(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
         const d = try cg.nodeAs(id.declarator, .declarator);
 
         for (if (is_async) func_gen_async else func_gen) |func| {
+            const is_aggregate_return_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
             try cg.printIndent(4);
             try cg.genType(decl.decl_spec); // Return Type
+            if (is_aggregate_return_type) {
+                std.debug.assert(!d.is_pointer);
+                try cg.print("* ", .{});
+            }
             if (d.is_pointer) {
                 for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
                 try cg.print(" ", .{});
@@ -1179,6 +1293,12 @@ fn genCVtableFuncDef(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
             try cg.print("(\n", .{});
             try cg.printIndent(8);
             try cg.print("{s}{s} *This", .{ if (is_async) "Async" else "", interface_name }); // BaseType argument
+            if (is_aggregate_return_type) {
+                try cg.print(",\n", .{});
+                try cg.printIndent(8);
+                try cg.genType(decl.decl_spec);
+                try cg.print("*__ret", .{});
+            }
             if (func.args) {
                 if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
                 try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
@@ -1394,6 +1514,7 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
         const d = try cg.nodeAs(id.declarator, .declarator);
 
         for (if (is_async) func_gen_async else func_gen) |func| {
+            const is_aggregate_return_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
             const dd: Node.DirectDeclarator = blk: {
                 if (cg.nodeAs(d.decl.?, .declarator)) |de| {
                     if (de.call_conv) |cc| try cg.genCallConv(cc);
@@ -1417,14 +1538,24 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
                 try cg.genArgList(dd.suffix, .{});
             }
             try cg.print(") {{\n", .{});
+
+            if (is_aggregate_return_type) {
+                try cg.printIndent(4);
+                try cg.genType(decl.decl_spec);
+                try cg.print("__ret;\n", .{});
+            }
+
             try cg.printIndent(4);
             // Ideally use the ref to decl and don't need to conditions
             if (!cg.isVoidType(decl.decl_spec) or cg.pointerCount(id.declarator) != 0) {
                 try cg.print("return ", .{});
             }
-            try cg.print("This->lpVtbl->{s}{s}", .{ func.prefix, func_prefix });
+            try cg.print("{s}This->lpVtbl->{s}{s}", .{ if (is_aggregate_return_type) "*" else "", func.prefix, func_prefix });
             try cg.genType(dd.base);
             try cg.print("(This", .{});
+            if (is_aggregate_return_type) {
+                try cg.print(",&__ret", .{});
+            }
             if (func.args) {
                 if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
                 try cg.genArgList(dd.suffix, .{ .only_name = true });
@@ -1456,6 +1587,7 @@ fn genCObjectMacro(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is
         const d = try cg.nodeAs(id.declarator, .declarator);
 
         for (if (is_async) func_gen_async else func_gen) |func| {
+            const is_aggregate_return_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
             const dd: Node.DirectDeclarator = blk: {
                 if (cg.nodeAs(d.decl.?, .declarator)) |de| {
                     if (de.call_conv) |cc| try cg.genCallConv(cc);
@@ -1473,14 +1605,21 @@ fn genCObjectMacro(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is
                 try cg.genArgList(dd.suffix, .{ .only_name = true });
             }
             try cg.print(") ", .{});
-            try cg.print("(This)->lpVtbl->{s}{s}", .{ func.prefix, func_prefix });
-            try cg.genType(dd.base);
-            try cg.print("(This", .{});
-            if (func.args) {
-                if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-                try cg.genArgList(dd.suffix, .{ .only_name = true });
+
+            if (is_aggregate_return_type) {
+                try cg.print("{s}{s}_{s}{s}", .{ prefix, interface_name, func.prefix, func_prefix });
+                try cg.genType(dd.base);
+                try cg.print("_define_WIDL_C_INLINE_WRAPPERS_for_aggregate_return_support\n", .{});
+            } else {
+                try cg.print("(This)->lpVtbl->{s}{s}", .{ func.prefix, func_prefix });
+                try cg.genType(dd.base);
+                try cg.print("(This", .{});
+                if (func.args) {
+                    if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
+                    try cg.genArgList(dd.suffix, .{ .only_name = true });
+                }
+                try cg.print(")\n", .{});
             }
-            try cg.print(")\n", .{});
         }
     }
 }

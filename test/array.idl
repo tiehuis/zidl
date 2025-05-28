@@ -1,0 +1,12 @@
+// conformant array as VLA
+typedef struct _SID {
+  BYTE SubAuthorityCount;
+  [size_is (SubAuthorityCount)] ULONG SubAuthority[*];
+} SID;
+
+
+// conformant array as function argument
+[object, local, pointer_default (unique), uuid (24918acc-64b3-37c1-8ca9-74a66e9957a8)]
+interface IAudioSessionEvents {
+  HRESULT OnChannelVolumeChanged ([in] DWORD ChannelCount,[in, size_is (ChannelCount)]float NewChannelVolumeArray[*]);
+};

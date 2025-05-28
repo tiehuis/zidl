@@ -120,3 +120,11 @@ test "rewrite_bool_to_winbool" {
 test "long_literal" {
     try expect("long_literal");
 }
+
+test "aggregate_return" {
+    try expect("aggregate_return");
+}
+
+test "array" {
+    try expect("array");
+}

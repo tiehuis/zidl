@@ -1,0 +1,17 @@
+typedef struct AGGREGATE_RETURN
+{
+    int Arg1;
+    int Arg2;
+} AGGREGATE_RETURN;
+
+[
+    uuid(554e41e8-ae8e-4a8c-b7d2-5b4f274a30e4),
+    object,
+    local,
+    pointer_default(unique)
+]
+interface AggregateReturnInterface
+{
+    AGGREGATE_RETURN GetDesc();
+    AGGREGATE_RETURN GetDescArg(int a);
+}
