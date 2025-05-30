@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+DATE_CMD=$(command -v gdate || command -v date)
+start_time=$($DATE_CMD +%s%3N)
+
 # Values < threshold are considered minor differences.
 # We expect small diffs on some files. Ideally just 1 (the auto-generated
 # header will differ) but for now, work on the larger diffs which typically
@@ -52,9 +55,15 @@ for idl_file in "$1"/*.idl; do
   rm "$gen_h"
 done
 
+end_time=$($DATE_CMD +%s%3N)
+duration_ms=$(( end_time - start_time ))
+duration_sec=$(( duration_ms / 1000 ))
+duration_rem_ms=$(( duration_ms % 1000 ))
+
 echo
 echo "========= SUMMARY ========="
 echo "Total processed:   $total_count"
+echo "Total Time:        ${duration_sec}s ${duration_rem_ms}ms"
 echo "Skipped (no .h):   $skipped_count"
 echo "Minor diffs (<$DIFF_THRESHOLD): $match_count"
 echo "Major diffs (≥$DIFF_THRESHOLD): $mismatch_count"

@@ -17,6 +17,7 @@ nodes: []const Node,
 data: []const Node.Ref,
 intern_pool: InternPool,
 options: Options,
+arena: std.heap.ArenaAllocator,
 
 next_id: usize = 0,
 indent: usize = 0,
@@ -37,6 +38,7 @@ pub fn init(cc: *Compile, parser: *const Parser, options: Options) CodeGen {
         .nodes = parser.nodes.items,
         .data = parser.data.items,
         .intern_pool = parser.intern_pool,
+        .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
         .options = options,
     };
 }
@@ -57,11 +59,10 @@ fn nodeAs(
 }
 
 pub fn gen(cg: *CodeGen) !void {
-    var store1: [256]u8 = undefined;
-    const header_filename = try makeHeaderFilename(&store1, cg.options.source_filepath);
+    defer _ = cg.arena.reset(.retain_capacity);
 
-    var store2: [64]u8 = undefined;
-    const header_guard_name = try makeHeaderGuardName(&store2, header_filename);
+    const header_filename = try cg.makeHeaderFilename(cg.options.source_filepath);
+    const header_guard_name = try cg.makeHeaderGuardName(header_filename);
 
     try cg.genHeader(header_guard_name);
 
@@ -78,6 +79,8 @@ pub fn gen(cg: *CodeGen) !void {
 }
 
 fn genImportHeaders(cg: *CodeGen) !void {
+    defer _ = cg.arena.reset(.retain_capacity);
+
     try cg.print(
         \\/* Headers for imported files */
         \\
@@ -90,8 +93,7 @@ fn genImportHeaders(cg: *CodeGen) !void {
         const lit = cg.intern_pool.get(import.import.subject).?;
         std.debug.assert(lit.len <= 128);
 
-        var buf: [128]u8 = undefined;
-        const header_filename = try makeHeaderFilename(&buf, lit);
+        const header_filename = try cg.makeHeaderFilename(lit);
         try cg.print("#include <{s}>\n", .{header_filename});
     }
 
@@ -541,11 +543,11 @@ fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Err
             try cg.print("struct {s} {{\n", .{name});
 
             // Tag
-            try cg.printIndent(cg.indent + 4);
+            try cg.printIndent(4);
             try cg.genTypeContext(sw.sfield, context);
             try cg.print(";\n", .{});
             // Union
-            try cg.printIndent(cg.indent + 4);
+            try cg.printIndent(4);
             try cg.print("union ", .{});
             try cg.genNameOrFallback(null);
             try cg.print(" {{\n", .{});
@@ -556,11 +558,11 @@ fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Err
                         switch (sfield) {
                             .attributes => continue,
                             .s_field => |f| {
-                                try cg.printIndent(cg.indent + 8);
+                                try cg.printIndent(8);
                                 try cg.genTypeContext(f, context);
                             },
                             .s_field_optional => |mf| if (mf) |f| {
-                                try cg.printIndent(cg.indent + 8);
+                                try cg.printIndent(8);
                                 try cg.genTypeContext(f, context);
                             } else continue,
                         }
@@ -569,9 +571,9 @@ fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Err
                 }
                 try cg.print(";\n", .{});
             }
-            try cg.printIndent(cg.indent + 4);
+            try cg.printIndent(4);
             try cg.print("}} u;\n", .{});
-            try cg.printIndent(cg.indent);
+            try cg.printIndent(0);
             try cg.print("}}", .{});
         },
         .union_def => |def| {
@@ -584,13 +586,13 @@ fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Err
                         .s_field => |f| {
                             cg.indent += 4;
                             defer cg.indent -= 4;
-                            try cg.printIndent(cg.indent);
+                            try cg.printIndent(0);
                             try cg.genTypeContext(f, context);
                         },
                         .s_field_optional => |mf| if (mf) |f| {
                             cg.indent += 4;
                             defer cg.indent -= 4;
-                            try cg.printIndent(cg.indent);
+                            try cg.printIndent(0);
                             try cg.genTypeContext(f, context);
                         } else continue,
                     },
@@ -598,7 +600,7 @@ fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Err
                 }
                 try cg.print(";\n", .{});
             }
-            try cg.printIndent(cg.indent);
+            try cg.printIndent(0);
             try cg.print("}} {s}UNIONNAME", .{name});
         },
         .union_field => |field| switch (field) {
@@ -714,144 +716,116 @@ fn genVirtualFuncDecl(cg: *CodeGen, decl: Node.Decl, is_async: bool) !void {
     // call_as(func) => this should not be generated
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
-    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
-        "get_"
-    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
-        "put_"
-    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
-        "putref_"
-    else
-        "";
+    const function = try cg.resolveFuncDef(decl) orelse return;
 
-    if (decl.init_decl) |init_decl| {
-        if (!cg.isFuncDecl(init_decl)) return;
+    for (if (is_async) func_gen_async else func_gen) |func_gen_options| {
+        if (function.return_type_is_aggregate) {
+            try cg.print("#ifdef WIDL_EXPLICIT_AGGREGATE_RETURNS\n", .{});
+            // Render virtual func
+            {
+                try cg.printIndent(4);
+                try cg.print("virtual ", .{});
+                try cg.genType(function.return_type); // Return Type
+                try cg.print("* ", .{});
+                if (function.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
 
-        const id = try cg.nodeAs(init_decl, .init_declarator);
-        const d = try cg.nodeAs(id.declarator, .declarator);
+                try cg.print("{s}{s}", .{ func_gen_options.prefix, function.prefix });
+                try cg.genType(function.name);
+                try cg.print("(\n", .{});
 
-        for (if (is_async) func_gen_async else func_gen) |vfunc| {
-            const dd: Node.DirectDeclarator = blk: {
-                if (cg.nodeAs(d.decl.?, .declarator)) |de| {
-                    if (de.call_conv) |cc| try cg.genCallConv(cc);
-                    break :blk try cg.nodeAs(de.decl.?, .direct_decl);
-                } else |_| {
-                    break :blk try cg.nodeAs(d.decl.?, .direct_decl);
+                // Will always have an initial argument
+                try cg.printIndent(8);
+                try cg.genType(function.return_type);
+                try cg.print("*__ret", .{});
+                if (func_gen_options.args and function.args_len != 0) {
+                    try cg.print(",", .{});
+                    try cg.genArgList(function.args, .{ .indent = 8, .split_args_by_line = true });
                 }
-            };
+                try cg.print(") = 0;\n", .{});
+            }
 
-            // Clean this up, should share more logic. Probably should do an AST -> IR pass or at minimum clean
-            // up the AST so it is less generic.
-            const is_aggregate_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
-            if (is_aggregate_type) {
-                const aggregate_return_type = decl.decl_spec;
-                try cg.print("#ifdef WIDL_EXPLICIT_AGGREGATE_RETURNS\n", .{});
-                // Render virtual func
-                {
-                    try cg.printIndent(4);
-                    try cg.print("virtual ", .{});
-                    try cg.genType(aggregate_return_type); // Return Type
-                    std.debug.assert(!d.is_pointer); // Aggregate Type => not pointer
-                    try cg.print("* ", .{});
-                    if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+            // Render non virtual proxy func
+            {
+                try cg.printIndent(4);
+                try cg.genType(function.return_type);
+                if (function.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
 
-                    try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
-                    try cg.genType(dd.base); // Function Name
-                    try cg.print("(\n", .{});
-
-                    // Will always have an initial argument
-                    try cg.printIndent(8);
-                    try cg.genType(aggregate_return_type);
-                    try cg.print("*__ret", .{});
-                    if (vfunc.args and cg.argListLen(dd.suffix) != 0) {
-                        try cg.print(",", .{});
-                        try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
-                    }
-                    try cg.print(") = 0;\n", .{});
-                }
-
-                // Render non virtual proxy func
-                {
-                    try cg.printIndent(4);
-                    try cg.genType(aggregate_return_type); // Return Type
-                    if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
-
-                    try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
-                    try cg.genType(dd.base); // Function Name
-                    try cg.print("(", .{});
-                    if (vfunc.args) {
-                        try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
-                        if (cg.argListLen(dd.suffix) == 0) {
-                            // WIDL renders empty cpp virtual decls as
-                            //
-                            // ```
-                            //    Function(
-                            //        );
-                            // ```
-                            try cg.print("\n", .{});
-                            try cg.printIndent(8);
-                        }
-                    } else {
+                try cg.print("{s}{s}", .{ func_gen_options.prefix, function.prefix });
+                try cg.genType(function.name);
+                try cg.print("(", .{});
+                if (func_gen_options.args) {
+                    try cg.genArgList(function.args, .{ .indent = 8, .split_args_by_line = true });
+                    if (function.args_len == 0) {
+                        // WIDL renders empty cpp virtual decls as
+                        //
+                        // ```
+                        //    Function(
+                        //        );
+                        // ```
                         try cg.print("\n", .{});
                         try cg.printIndent(8);
                     }
-                    try cg.print(")\n", .{});
-
-                    // Body
-                    try cg.printIndent(4);
-                    try cg.print("{{\n", .{});
-                    try cg.printIndent(8);
-                    try cg.genType(aggregate_return_type);
-                    try cg.print("__ret;\n", .{});
-                    try cg.printIndent(8);
-                    try cg.print("return *", .{});
-                    try cg.genType(dd.base); // Function name
-                    try cg.print("(&__ret", .{});
-                    if (cg.argListLen(dd.suffix) != 0) {
-                        try cg.print(",", .{});
-                        try cg.genArgList(dd.suffix, .{ .split_args_by_line = false, .only_name = true });
-                    }
-                    try cg.print(");\n", .{});
-                    try cg.printIndent(4);
-                    try cg.print("}}\n", .{});
-                }
-
-                try cg.print("#else\n", .{});
-            }
-
-            try cg.printIndent(4);
-            try cg.print("virtual ", .{});
-            try cg.genType(decl.decl_spec); // Return Type
-            if (d.is_pointer) {
-                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
-                try cg.print(" ", .{});
-            }
-            if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
-
-            try cg.print("{s}{s}", .{ vfunc.prefix, func_prefix });
-            try cg.genType(dd.base); // Function Name
-            try cg.print("(", .{});
-            if (vfunc.args) {
-                try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
-                if (cg.argListLen(dd.suffix) == 0) {
-                    // WIDL renders empty cpp virtual decls as
-                    //
-                    // ```
-                    //    Function(
-                    //        );
-                    // ```
+                } else {
                     try cg.print("\n", .{});
                     try cg.printIndent(8);
                 }
-            } else {
+                try cg.print(")\n", .{});
+
+                // Body
+                try cg.printIndent(4);
+                try cg.print("{{\n", .{});
+                try cg.printIndent(8);
+                try cg.genType(function.return_type);
+                try cg.print("__ret;\n", .{});
+                try cg.printIndent(8);
+                try cg.print("return *", .{});
+                try cg.genType(function.name);
+                try cg.print("(&__ret", .{});
+                if (function.args_len != 0) {
+                    try cg.print(",", .{});
+                    try cg.genArgList(function.args, .{ .split_args_by_line = false, .only_name = true });
+                }
+                try cg.print(");\n", .{});
+                try cg.printIndent(4);
+                try cg.print("}}\n", .{});
+            }
+
+            try cg.print("#else\n", .{});
+        }
+
+        try cg.printIndent(4);
+        try cg.print("virtual ", .{});
+        try cg.genType(function.return_type);
+        if (function.return_type_pointer_count > 0) {
+            for (0..function.return_type_pointer_count) |_| try cg.print("*", .{});
+            try cg.print(" ", .{});
+        }
+        if (function.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+
+        try cg.print("{s}{s}", .{ func_gen_options.prefix, function.prefix });
+        try cg.genType(function.name);
+        try cg.print("(", .{});
+        if (func_gen_options.args) {
+            try cg.genArgList(function.args, .{ .indent = 8, .split_args_by_line = true });
+            if (function.args_len == 0) {
+                // WIDL renders empty cpp virtual decls as
+                //
+                // ```
+                //    Function(
+                //        );
+                // ```
                 try cg.print("\n", .{});
                 try cg.printIndent(8);
             }
-            try cg.print(") = 0;\n", .{});
-            if (is_aggregate_type) {
-                try cg.print("#endif\n", .{});
-            }
+        } else {
             try cg.print("\n", .{});
+            try cg.printIndent(8);
         }
+        try cg.print(") = 0;\n", .{});
+        if (function.return_type_is_aggregate) {
+            try cg.print("#endif\n", .{});
+        }
+        try cg.print("\n", .{});
     }
 }
 
@@ -1021,14 +995,14 @@ fn genStructDef(cg: *CodeGen, struct_def: Node.StructDef, ty: enum { root, membe
         const sfield: Node.StructField = try cg.nodeAs(cg.data[index], .struct_field);
         switch (sfield.field) {
             .@"union" => |ref| {
-                try cg.printIndent(cg.indent);
+                try cg.printIndent(0);
                 try cg.genTypeContext(ref, .def);
                 try cg.print(";\n", .{});
             },
             .default => |node| {
                 for (node.struct_decl_list.start..node.struct_decl_list.end) |j| {
                     const struct_decl: Node.StructDecl = try cg.nodeAs(cg.data[j], .struct_decl);
-                    try cg.printIndent(cg.indent);
+                    try cg.printIndent(0);
                     try cg.genTypeContext(node.decl_spec, .def);
                     try cg.genTypeContext(struct_decl.any_decl, .def);
                     try cg.print(";\n", .{});
@@ -1036,7 +1010,7 @@ fn genStructDef(cg: *CodeGen, struct_def: Node.StructDef, ty: enum { root, membe
             },
         }
     }
-    try cg.printIndent(cg.indent);
+    try cg.printIndent(0);
     try cg.print("}}", .{});
     if (ty == .member) {
         // TODO: Handle multiple anonymous structs in one union
@@ -1244,67 +1218,107 @@ fn genArgList(cg: *CodeGen, range: Node.Range, options: GenArgListOptions) !void
     }
 }
 
+// This namespace manages resolution of index-based nodes into a more concrete structure
+// which is easier to work with. I may separate this out into its own IR pass at some point,
+// but also could get away with resolving lazily, TBD.
+const Resolved = struct {
+    const FuncDef = struct {
+        attributes: ?Node.Range,
+        return_type: Node.Ref,
+        return_type_pointer_count: usize,
+        return_type_is_aggregate: bool,
+        call_conv: ?Node.CallConv,
+        name: Node.Ref,
+        args: Node.Range,
+        args_len: usize, // count of non-void arguments
+        prefix: []const u8, // e.g. get_, put_, putref_. Empty if no prefix.
+    };
+};
+
+fn resolveFuncDef(cg: *CodeGen, decl: Node.Decl) !?Resolved.FuncDef {
+    if (decl.init_decl == null) return null;
+    if (!cg.isFuncDecl(decl.init_decl.?)) return null; // TODO: Try get rid of this check and handle with below conditions
+
+    const init_declarator: Node.InitDeclarator = try cg.nodeAs(decl.init_decl.?, .init_declarator);
+    const declarator: Node.Declarator = try cg.nodeAs(init_declarator.declarator, .declarator);
+
+    const return_type = decl.decl_spec;
+    const return_type_is_aggregate = !declarator.is_pointer and cg.isAggregateType(return_type);
+    const return_type_pointer_count = cg.pointerCount(init_declarator.declarator);
+    var call_conv: ?Node.CallConv = declarator.call_conv;
+    const direct_declarator: Node.DirectDeclarator = blk: {
+        var func_declarator = declarator;
+        while (true) {
+            if (cg.nodeAs(func_declarator.decl.?, .declarator)) |new_func_declarator| {
+                std.debug.assert(call_conv == null or call_conv == func_declarator.call_conv); // multiple call_conv's must be compatible
+                call_conv = func_declarator.call_conv;
+                func_declarator = new_func_declarator;
+            } else |_| {
+                break :blk try cg.nodeAs(func_declarator.decl.?, .direct_decl);
+            }
+        }
+    };
+
+    const prefix: []const u8 = blk: {
+        inline for (&.{
+            .{ .propget, "get_" },
+            .{ .propput, "put_" },
+            .{ .propputref, "putref_" },
+        }) |e| if (try cg.getAttribute(decl.attributes, e[0])) |_| break :blk e[1];
+
+        break :blk "";
+    };
+
+    return .{
+        .attributes = decl.attributes,
+        .return_type = return_type,
+        .return_type_pointer_count = return_type_pointer_count,
+        .return_type_is_aggregate = return_type_is_aggregate,
+        .call_conv = call_conv,
+        .name = direct_declarator.base,
+        .args = direct_declarator.suffix,
+        .args_len = cg.argListLen(direct_declarator.suffix),
+        .prefix = prefix,
+    };
+}
+
 fn genCVtableFuncDef(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is_async: bool) !void {
     // call_as(func) => this should not be generated
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
-    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
-        "get_"
-    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
-        "put_"
-    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
-        "putref_"
-    else
-        "";
+    const function = try cg.resolveFuncDef(decl) orelse return;
 
-    if (decl.init_decl) |init_decl| {
-        if (!cg.isFuncDecl(init_decl)) return;
-
-        const id = try cg.nodeAs(init_decl, .init_declarator);
-        const d = try cg.nodeAs(id.declarator, .declarator);
-
-        for (if (is_async) func_gen_async else func_gen) |func| {
-            const is_aggregate_return_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
-            try cg.printIndent(4);
-            try cg.genType(decl.decl_spec); // Return Type
-            if (is_aggregate_return_type) {
-                std.debug.assert(!d.is_pointer);
-                try cg.print("* ", .{});
-            }
-            if (d.is_pointer) {
-                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
-                try cg.print(" ", .{});
-            }
-            try cg.print("(", .{});
-            if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
-
-            const dd: Node.DirectDeclarator = blk: {
-                if (cg.nodeAs(d.decl.?, .declarator)) |de| {
-                    if (de.call_conv) |cc| try cg.genCallConv(cc);
-                    break :blk try cg.nodeAs(de.decl.?, .direct_decl);
-                } else |_| {
-                    break :blk try cg.nodeAs(d.decl.?, .direct_decl);
-                }
-            };
-
-            try cg.print("*{s}{s}", .{ func.prefix, func_prefix });
-            try cg.genType(dd.base); // Function Name
-            try cg.print(")", .{});
-            try cg.print("(\n", .{});
-            try cg.printIndent(8);
-            try cg.print("{s}{s} *This", .{ if (is_async) "Async" else "", interface_name }); // BaseType argument
-            if (is_aggregate_return_type) {
-                try cg.print(",\n", .{});
-                try cg.printIndent(8);
-                try cg.genType(decl.decl_spec);
-                try cg.print("*__ret", .{});
-            }
-            if (func.args) {
-                if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-                try cg.genArgList(dd.suffix, .{ .indent = 8, .split_args_by_line = true });
-            }
-            try cg.print(");\n\n", .{});
+    for (if (is_async) func_gen_async else func_gen) |func_gen_options| {
+        try cg.printIndent(4);
+        try cg.genType(function.return_type);
+        if (function.return_type_is_aggregate) {
+            try cg.print("* ", .{});
         }
+        if (function.return_type_pointer_count > 0) {
+            for (0..function.return_type_pointer_count) |_| try cg.print("*", .{});
+            try cg.print(" ", .{});
+        }
+        try cg.print("(", .{});
+        if (function.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+
+        try cg.print("*{s}{s}", .{ func_gen_options.prefix, function.prefix });
+        try cg.genType(function.name);
+        try cg.print(")", .{});
+        try cg.print("(\n", .{});
+        try cg.printIndent(8);
+        try cg.print("{s}{s} *This", .{ if (is_async) "Async" else "", interface_name }); // BaseType argument
+
+        if (function.return_type_is_aggregate) {
+            try cg.print(",\n", .{});
+            try cg.printIndent(8);
+            try cg.genType(function.return_type);
+            try cg.print("*__ret", .{});
+        }
+        if (func_gen_options.args) {
+            if (function.args_len != 0) try cg.print(",", .{});
+            try cg.genArgList(function.args, .{ .indent = 8, .split_args_by_line = true });
+        }
+        try cg.print(");\n\n", .{});
     }
 }
 
@@ -1497,72 +1511,49 @@ fn genCInlineWrapper(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, 
     // call_as(func) => this should not be generated
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
-    const prefix = if (is_async) "Async" else "";
-    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
-        "get_"
-    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
-        "put_"
-    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
-        "putref_"
-    else
-        "";
+    const async_prefix = if (is_async) "Async" else "";
+    const function = try cg.resolveFuncDef(decl) orelse return;
 
-    if (decl.init_decl) |init_decl| {
-        if (!cg.isFuncDecl(init_decl)) return;
-
-        const id = try cg.nodeAs(init_decl, .init_declarator);
-        const d = try cg.nodeAs(id.declarator, .declarator);
-
-        for (if (is_async) func_gen_async else func_gen) |func| {
-            const is_aggregate_return_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
-            const dd: Node.DirectDeclarator = blk: {
-                if (cg.nodeAs(d.decl.?, .declarator)) |de| {
-                    if (de.call_conv) |cc| try cg.genCallConv(cc);
-                    break :blk try cg.nodeAs(de.decl.?, .direct_decl);
-                } else |_| {
-                    break :blk try cg.nodeAs(d.decl.?, .direct_decl);
-                }
-            };
-
-            try cg.print("static inline ", .{});
-            try cg.genType(decl.decl_spec); // Return Type
-            if (d.is_pointer) {
-                for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
-                try cg.print(" ", .{});
-            }
-            try cg.print("{s}{s}_{s}{s}", .{ prefix, interface_name, func.prefix, func_prefix });
-            try cg.genType(dd.base); // Function Name
-            try cg.print("({s}{s}* This", .{ prefix, interface_name });
-            if (func.args) {
-                if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-                try cg.genArgList(dd.suffix, .{});
-            }
-            try cg.print(") {{\n", .{});
-
-            if (is_aggregate_return_type) {
-                try cg.printIndent(4);
-                try cg.genType(decl.decl_spec);
-                try cg.print("__ret;\n", .{});
-            }
-
-            try cg.printIndent(4);
-            // Ideally use the ref to decl and don't need to conditions
-            if (!cg.isVoidType(decl.decl_spec) or cg.pointerCount(id.declarator) != 0) {
-                try cg.print("return ", .{});
-            }
-            try cg.print("{s}This->lpVtbl->{s}{s}", .{ if (is_aggregate_return_type) "*" else "", func.prefix, func_prefix });
-            try cg.genType(dd.base);
-            try cg.print("(This", .{});
-            if (is_aggregate_return_type) {
-                try cg.print(",&__ret", .{});
-            }
-            if (func.args) {
-                if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-                try cg.genArgList(dd.suffix, .{ .only_name = true });
-            }
-            try cg.print(");\n", .{});
-            try cg.print("}}\n", .{});
+    for (if (is_async) func_gen_async else func_gen) |func_gen_options| {
+        try cg.print("static inline ", .{});
+        try cg.genType(function.return_type);
+        if (function.return_type_pointer_count > 0) {
+            for (0..function.return_type_pointer_count) |_| try cg.print("*", .{});
+            try cg.print(" ", .{});
         }
+
+        try cg.print("{s}{s}_{s}{s}", .{ async_prefix, interface_name, func_gen_options.prefix, function.prefix });
+        try cg.genType(function.name);
+        try cg.print("({s}{s}* This", .{ async_prefix, interface_name });
+        if (func_gen_options.args) {
+            if (function.args_len != 0) try cg.print(",", .{});
+            try cg.genArgList(function.args, .{});
+        }
+        try cg.print(") {{\n", .{});
+
+        if (function.return_type_is_aggregate) {
+            try cg.printIndent(4);
+            try cg.genType(function.return_type);
+            try cg.print("__ret;\n", .{});
+        }
+
+        try cg.printIndent(4);
+        // Ideally use the ref to decl and don't need to conditions
+        if (!cg.isVoidType(function.return_type) or function.return_type_pointer_count != 0) {
+            try cg.print("return ", .{});
+        }
+        try cg.print("{s}This->lpVtbl->{s}{s}", .{ if (function.return_type_is_aggregate) "*" else "", func_gen_options.prefix, function.prefix });
+        try cg.genType(function.name);
+        try cg.print("(This", .{});
+        if (function.return_type_is_aggregate) {
+            try cg.print(",&__ret", .{});
+        }
+        if (func_gen_options.args) {
+            if (function.args_len != 0) try cg.print(",", .{});
+            try cg.genArgList(function.args, .{ .only_name = true });
+        }
+        try cg.print(");\n", .{});
+        try cg.print("}}\n", .{});
     }
 }
 
@@ -1570,56 +1561,32 @@ fn genCObjectMacro(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl, is
     // call_as(func) => this should not be generated
     if (try cg.getAttribute(decl.attributes, .call_as)) |_| return;
 
-    const prefix = if (is_async) "Async" else "";
-    const func_prefix = if (try cg.getAttribute(decl.attributes, .propget)) |_|
-        "get_"
-    else if (try cg.getAttribute(decl.attributes, .propput)) |_|
-        "put_"
-    else if (try cg.getAttribute(decl.attributes, .propputref)) |_|
-        "putref_"
-    else
-        "";
+    const async_prefix = if (is_async) "Async" else "";
+    const function = try cg.resolveFuncDef(decl) orelse return;
 
-    if (decl.init_decl) |init_decl| {
-        if (!cg.isFuncDecl(init_decl)) return;
+    for (if (is_async) func_gen_async else func_gen) |func_gen_options| {
+        try cg.print("#define {s}{s}_{s}{s}", .{ async_prefix, interface_name, func_gen_options.prefix, function.prefix });
+        try cg.genType(function.name);
+        try cg.print("(This", .{});
+        if (func_gen_options.args) {
+            if (function.args_len != 0) try cg.print(",", .{});
+            try cg.genArgList(function.args, .{ .only_name = true });
+        }
+        try cg.print(") ", .{});
 
-        const id = try cg.nodeAs(init_decl, .init_declarator);
-        const d = try cg.nodeAs(id.declarator, .declarator);
-
-        for (if (is_async) func_gen_async else func_gen) |func| {
-            const is_aggregate_return_type = !d.is_pointer and cg.isAggregateType(decl.decl_spec);
-            const dd: Node.DirectDeclarator = blk: {
-                if (cg.nodeAs(d.decl.?, .declarator)) |de| {
-                    if (de.call_conv) |cc| try cg.genCallConv(cc);
-                    break :blk try cg.nodeAs(de.decl.?, .direct_decl);
-                } else |_| {
-                    break :blk try cg.nodeAs(d.decl.?, .direct_decl);
-                }
-            };
-
-            try cg.print("#define {s}{s}_{s}{s}", .{ prefix, interface_name, func.prefix, func_prefix });
-            try cg.genType(dd.base); // Function Name
+        if (function.return_type_is_aggregate) {
+            try cg.print("{s}{s}_{s}{s}", .{ async_prefix, interface_name, func_gen_options.prefix, function.prefix });
+            try cg.genType(function.name);
+            try cg.print("_define_WIDL_C_INLINE_WRAPPERS_for_aggregate_return_support\n", .{});
+        } else {
+            try cg.print("(This)->lpVtbl->{s}{s}", .{ func_gen_options.prefix, function.prefix });
+            try cg.genType(function.name);
             try cg.print("(This", .{});
-            if (func.args) {
-                if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-                try cg.genArgList(dd.suffix, .{ .only_name = true });
+            if (func_gen_options.args) {
+                if (function.args_len != 0) try cg.print(",", .{});
+                try cg.genArgList(function.args, .{ .only_name = true });
             }
-            try cg.print(") ", .{});
-
-            if (is_aggregate_return_type) {
-                try cg.print("{s}{s}_{s}{s}", .{ prefix, interface_name, func.prefix, func_prefix });
-                try cg.genType(dd.base);
-                try cg.print("_define_WIDL_C_INLINE_WRAPPERS_for_aggregate_return_support\n", .{});
-            } else {
-                try cg.print("(This)->lpVtbl->{s}{s}", .{ func.prefix, func_prefix });
-                try cg.genType(dd.base);
-                try cg.print("(This", .{});
-                if (func.args) {
-                    if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-                    try cg.genArgList(dd.suffix, .{ .only_name = true });
-                }
-                try cg.print(")\n", .{});
-            }
+            try cg.print(")\n", .{});
         }
     }
 }
@@ -1641,52 +1608,39 @@ fn genInterfaceStubProxy(cg: *CodeGen, interface: Node.InterfaceDef) !void {
 }
 
 fn genInterfaceProxy(cg: *CodeGen, interface_name: []const u8, decl: Node.Decl) !void {
-    if (decl.attributes) |attrs| {
-        // local => not remote callable?
-        if (try cg.getAttribute(attrs, .local)) |_| return;
-    }
+    // local => not remote callable?
+    if (try cg.getAttribute(decl.attributes, .local)) |_| return;
 
     // TODO: Not being generated sometimes (e.g. wbcodecdsp.idl).
-    try cg.genType(decl.decl_spec); // Return Type
-    if (decl.init_decl) |init_decl| {
-        const id = try cg.nodeAs(init_decl, .init_declarator);
-        const d = try cg.nodeAs(id.declarator, .declarator);
-        if (d.is_pointer) {
-            for (0..cg.pointerCount(id.declarator)) |_| try cg.print("*", .{});
-            try cg.print(" ", .{});
-        }
-        if (d.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+    const function = try cg.resolveFuncDef(decl) orelse return;
 
-        const dd: Node.DirectDeclarator = blk: {
-            if (cg.nodeAs(d.decl.?, .declarator)) |de| {
-                if (de.call_conv) |cc| try cg.genCallConv(cc);
-                break :blk try cg.nodeAs(de.decl.?, .direct_decl);
-            } else |_| {
-                break :blk try cg.nodeAs(d.decl.?, .direct_decl);
-            }
-        };
-
-        try cg.print("{s}_", .{interface_name});
-        try cg.genType(dd.base); // Function Name
-        try cg.print("_Proxy(\n", .{});
-
-        try cg.printIndent(4);
-        try cg.print("{s} *This", .{interface_name});
-        if (cg.argListLen(dd.suffix) != 0) try cg.print(",", .{});
-        try cg.genArgList(dd.suffix, .{ .indent = 4, .split_args_by_line = true });
-        try cg.print(");\n", .{});
-
-        try cg.print("void __RPC_STUB {s}_", .{interface_name});
-        try cg.genType(dd.base); // Function Name
-        try cg.print(
-            \\_Stub(
-            \\    IRpcStubBuffer* This,
-            \\    IRpcChannelBuffer* pRpcChannelBuffer,
-            \\    PRPC_MESSAGE pRpcMessage,
-            \\    DWORD* pdwStubPhase);
-            \\
-        , .{});
+    try cg.genType(function.return_type);
+    if (function.return_type_pointer_count > 0) {
+        for (0..function.return_type_pointer_count) |_| try cg.print("*", .{});
+        try cg.print(" ", .{});
     }
+    if (function.call_conv) |cc| try cg.genCallConv(cc) else try cg.print("STDMETHODCALLTYPE ", .{});
+
+    try cg.print("{s}_", .{interface_name});
+    try cg.genType(function.name);
+    try cg.print("_Proxy(\n", .{});
+
+    try cg.printIndent(4);
+    try cg.print("{s} *This", .{interface_name});
+    if (function.args_len != 0) try cg.print(",", .{});
+    try cg.genArgList(function.args, .{ .indent = 4, .split_args_by_line = true });
+    try cg.print(");\n", .{});
+
+    try cg.print("void __RPC_STUB {s}_", .{interface_name});
+    try cg.genType(function.args); // Function Name
+    try cg.print(
+        \\_Stub(
+        \\    IRpcStubBuffer* This,
+        \\    IRpcChannelBuffer* pRpcChannelBuffer,
+        \\    PRPC_MESSAGE pRpcMessage,
+        \\    DWORD* pdwStubPhase);
+        \\
+    , .{});
 }
 
 fn genInterfaceAttributes(cg: *CodeGen, interface: Node.InterfaceDef, is_async: bool) !void {
@@ -1911,8 +1865,16 @@ fn getAttribute(cg: *CodeGen, maybe_attrs: ?Node.Range, tag: Node.Attribute.Tag)
     return null;
 }
 
-fn printIndent(cg: *CodeGen, indent: usize) !void {
-    for (0..indent) |_| try cg.print(" ", .{});
+fn printIndent(cg: *CodeGen, indent_: usize) !void {
+    const spaces = " " ** 32;
+
+    // NOTE: Should just buffer the underlying stream
+    var indent = cg.indent + indent_;
+    while (indent >= spaces.len) : (indent -= spaces.len) {
+        @branchHint(.unlikely);
+        try cg.print("{s}", .{spaces[0..spaces.len]});
+    }
+    try cg.print("{s}", .{spaces[0..indent]});
 }
 
 fn print(cg: *CodeGen, comptime fmt: []const u8, args: anytype) !void {
@@ -1936,8 +1898,9 @@ fn getFilenameNoSuffix(cg: *CodeGen, filepath: []const u8) []const u8 {
         filename;
 }
 
-fn makeHeaderGuardName(buf: []u8, filename: []const u8) ![]u8 {
-    if (buf.len < 4 + filename.len) return error.Overflow;
+fn makeHeaderGuardName(cg: *CodeGen, filename: []const u8) ![]u8 {
+    var buf = try cg.arena.allocator().alloc(u8, filename.len + 4);
+
     buf[0] = '_';
     buf[1] = '_';
     for (filename, 0..) |c, i| {
@@ -1954,7 +1917,7 @@ fn makeHeaderGuardName(buf: []u8, filename: []const u8) ![]u8 {
 // Given an idl filepath, take the basename and convert the suffix to .h.
 //
 // example/file.idl -> file.h
-fn makeHeaderFilename(buf: []u8, filepath: []const u8) ![]u8 {
+fn makeHeaderFilename(cg: *CodeGen, filepath: []const u8) ![]u8 {
     const suffix = if (std.mem.lastIndexOfScalar(u8, filepath, '.')) |pos|
         filepath[pos..]
     else
@@ -1970,6 +1933,7 @@ fn makeHeaderFilename(buf: []u8, filepath: []const u8) ![]u8 {
     else
         filepath;
 
+    var buf = try cg.arena.allocator().alloc(u8, filename.len - suffix.len + 2);
     var i: usize = 0;
     while (i < filename.len - suffix.len) : (i += 1) {
         buf[i] = filename[i];
@@ -1981,17 +1945,17 @@ fn makeHeaderFilename(buf: []u8, filepath: []const u8) ![]u8 {
 fn genUuidList(cg: *CodeGen, uuid: u128) !void {
     const c = uuidComponents(uuid);
     try cg.print("0x{x:08}, 0x{x:04}, 0x{x:04}, 0x{x:02},0x{x:02}, 0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02},0x{x:02}", .{
-        c._96,
-        c._80,
-        c._64,
-        c._56,
-        c._48,
-        c._40,
-        c._32,
-        c._24,
-        c._16,
-        c._8,
-        c._0,
+        c.@"96-128",
+        c.@"80-96",
+        c.@"64-80",
+        c.@"56-64",
+        c.@"48-56",
+        c.@"40-48",
+        c.@"32-40",
+        c.@"24-32",
+        c.@"16-24",
+        c.@"8-16",
+        c.@"0-8",
     });
 }
 
@@ -2015,17 +1979,17 @@ pub fn uuidToString(buf: []u8, uuid: u128) []const u8 {
 }
 
 pub const UUIDComponents = struct {
-    _96: u32,
-    _80: u16,
-    _64: u16,
-    _56: u8,
-    _48: u8,
-    _40: u8,
-    _32: u8,
-    _24: u8,
-    _16: u8,
-    _8: u8,
-    _0: u8,
+    @"96-128": u32,
+    @"80-96": u16,
+    @"64-80": u16,
+    @"56-64": u8,
+    @"48-56": u8,
+    @"40-48": u8,
+    @"32-40": u8,
+    @"24-32": u8,
+    @"16-24": u8,
+    @"8-16": u8,
+    @"0-8": u8,
 };
 
 pub fn uuidComponents(uuid: u128) UUIDComponents {
@@ -2033,16 +1997,16 @@ pub fn uuidComponents(uuid: u128) UUIDComponents {
     const l: u64 = @truncate(uuid);
 
     return .{
-        ._96 = @truncate(h >> 32),
-        ._80 = @truncate(h >> 16),
-        ._64 = @truncate(h),
-        ._56 = @truncate(l >> 56),
-        ._48 = @truncate(l >> 48),
-        ._40 = @truncate(l >> 40),
-        ._32 = @truncate(l >> 32),
-        ._24 = @truncate(l >> 24),
-        ._16 = @truncate(l >> 16),
-        ._8 = @truncate(l >> 8),
-        ._0 = @truncate(l >> 0),
+        .@"96-128" = @truncate(h >> 32),
+        .@"80-96" = @truncate(h >> 16),
+        .@"64-80" = @truncate(h),
+        .@"56-64" = @truncate(l >> 56),
+        .@"48-56" = @truncate(l >> 48),
+        .@"40-48" = @truncate(l >> 40),
+        .@"32-40" = @truncate(l >> 32),
+        .@"24-32" = @truncate(l >> 24),
+        .@"16-24" = @truncate(l >> 16),
+        .@"8-16" = @truncate(l >> 8),
+        .@"0-8" = @truncate(l >> 0),
     };
 }

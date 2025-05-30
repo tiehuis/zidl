@@ -12,11 +12,12 @@ the zig compiler.
 ```
 ./check-dir mingw-w64/mingw-w64-headers/include/
 Total processed:   316
+Total Time:        25s 591ms
 Skipped (no .h):   7
 Minor diffs (<20): 116
 Major diffs (≥20): 200
 Crashes:           0
-Total Diff Lines:  631527
+Total Diff Lines:  631681
 ```
 
 # Compatibility
