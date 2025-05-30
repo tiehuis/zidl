@@ -19,6 +19,8 @@ intern_pool: InternPool,
 options: Options,
 arena: std.heap.ArenaAllocator,
 
+// TODO: Need an ABI root namespace in the case we have a namespace present
+current_namespace: std.ArrayList(Node.Ref),
 next_id: usize = 0,
 indent: usize = 0,
 
@@ -40,6 +42,7 @@ pub fn init(cc: *Compile, parser: *const Parser, options: Options) CodeGen {
         .intern_pool = parser.intern_pool,
         .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
         .options = options,
+        .current_namespace = .init(cc.allocator),
     };
 }
 
@@ -69,7 +72,7 @@ pub fn gen(cg: *CodeGen) !void {
     switch (cg.nodes[0]) {
         .root => |range| {
             for (range.start..range.end) |i|
-                try cg.genNode(cg.data[i], 0);
+                try cg.genNode(cg.data[i]);
         },
         else => unreachable,
     }
@@ -108,12 +111,18 @@ fn genInterfaceRef(cg: *CodeGen, name: Node.Ref) !void {
         \\#define __{0s}_FWD_DEFINED__
         \\typedef interface {0s} {0s};
         \\#ifdef __cplusplus
-        \\interface {0s};
+        \\
+    , .{typename});
+    try cg.genNamespaceOpen();
+    try cg.printIndent(0);
+    try cg.print("interface {0s};\n", .{typename});
+    try cg.genNamespaceClose();
+    try cg.print(
         \\#endif /* __cplusplus */
         \\#endif
         \\
         \\
-    , .{typename});
+    , .{});
 }
 
 fn genAsyncInterfaceRef(cg: *CodeGen, name: Node.Ref) !void {
@@ -124,12 +133,43 @@ fn genAsyncInterfaceRef(cg: *CodeGen, name: Node.Ref) !void {
         \\#define __Async{0s}_FWD_DEFINED__
         \\typedef interface Async{0s} Async{0s};
         \\#ifdef __cplusplus
-        \\interface Async{0s};
+        \\
+    , .{typename});
+    try cg.genNamespaceOpen();
+    try cg.printIndent(0);
+    try cg.print("interface Async{0s};\n", .{typename});
+    try cg.genNamespaceClose();
+    try cg.print(
         \\#endif /* __cplusplus */
         \\#endif
         \\
         \\
+    , .{});
+}
+
+fn genRuntimeClassRef(cg: *CodeGen, name: Node.Ref) !void {
+    const interface_name = try cg.nodeAs(name, .type);
+    const typename = cg.intern_pool.get(interface_name).?;
+    try cg.print(
+        \\#ifndef __{0s}_FWD_DEFINED__
+        \\#define __{0s}_FWD_DEFINED__
+        \\#ifdef __cplusplus
+        \\
     , .{typename});
+    try cg.genNamespaceOpen();
+    try cg.printIndent(0);
+    try cg.print("class {0s};\n", .{typename});
+    try cg.printIndent(0);
+    try cg.print("#else\n", .{});
+    try cg.printIndent(0);
+    try cg.print("typedef {0s} {0s};\n", .{typename});
+    try cg.genNamespaceClose();
+    try cg.print(
+        \\#endif /* __cplusplus */
+        \\#endif
+        \\
+        \\
+    , .{});
 }
 
 fn genCoClassRef(cg: *CodeGen, ref: Node.Ref) !void {
@@ -139,7 +179,13 @@ fn genCoClassRef(cg: *CodeGen, ref: Node.Ref) !void {
         \\#ifndef __{0s}_FWD_DEFINED__
         \\#define __{0s}_FWD_DEFINED__
         \\#ifdef __cplusplus
-        \\typedef class {0s} {0s};
+        \\
+    , .{typename});
+    try cg.genNamespaceOpen();
+    try cg.printIndent(0);
+    try cg.print("typedef class {0s} {0s};\n", .{typename});
+    try cg.genNamespaceClose();
+    try cg.print(
         \\#else
         \\typedef struct {0s} {0s};
         \\#endif /* defined __cplusplus */
@@ -156,6 +202,8 @@ fn genForwardDecls(cg: *CodeGen) !void {
         \\
     , .{});
 
+    // TODO: Store the namespace reference that the declarations were made in as we
+    // need this when generating.
     for (cg.parser.forward_decl_table.items) |index| {
         const node = cg.nodes[index.toInt()];
         switch (node) {
@@ -166,6 +214,7 @@ fn genForwardDecls(cg: *CodeGen) !void {
                 }
             },
             .coclass_def => |coclass| try cg.genCoClassRef(coclass.name),
+            .runtime_class_def => |def| try cg.genRuntimeClassRef(def.name),
             else => {
                 log.err("forward decl not implemented for node: {s}", .{@tagName(node)});
                 return error.CodeGenError;
@@ -255,9 +304,7 @@ fn genAdditionalPrototypes(cg: *CodeGen) !void {
 
 // Dynamic node processing
 
-fn genNode(cg: *CodeGen, node_index: Node.Ref, indent: usize) Error!void {
-    _ = indent;
-
+fn genNode(cg: *CodeGen, node_index: Node.Ref) Error!void {
     const node = cg.nodes[node_index.toInt()];
     switch (node) {
         .root => unreachable,
@@ -269,7 +316,7 @@ fn genNode(cg: *CodeGen, node_index: Node.Ref, indent: usize) Error!void {
         .library_def => |library| try cg.genLibrary(library),
         .import => |ref| {
             for (ref.statements.start..ref.statements.end) |index| {
-                try cg.genNode(cg.data[index], 0);
+                try cg.genNode(cg.data[index]);
             }
         },
         .typedef => |typedef| try cg.genTypedef(typedef),
@@ -283,10 +330,106 @@ fn genNode(cg: *CodeGen, node_index: Node.Ref, indent: usize) Error!void {
         },
         .importlib => {}, // TODO: Confirm
         .decl => |decl| try cg.genDecl(decl),
+        .namespace => |ns| try cg.genNamespace(ns),
+        .api_contract_def => |def| try cg.genApiContractDef(def),
+        .runtime_class_def => |def| try cg.genRuntimeClassDef(def),
+        .runtime_class_ref => |name| try cg.genRuntimeClassRef(name),
         else => {
             std.debug.print("unsupported node type: {s}\n", .{@tagName(node)});
             return error.UnexpectedNodeType;
         },
+    }
+}
+
+fn genRuntimeClassDef(cg: *CodeGen, runtime_class: Node.RuntimeClassDef) !void {
+    const typename = cg.intern_pool.get(cg.nodes[runtime_class.name.toInt()].type).?;
+
+    try cg.print(
+        \\/*
+        \\ * Class {0s}
+        \\ */
+        \\
+    , .{typename});
+
+    try cg.print(
+        \\#ifndef __RUNTIMECLASS_{0s}_INTERFACE_DEFINED__
+        \\#define __RUNTIMECLASS_{0s}_INTERFACE_DEFINED__
+        \\
+        \\#endif
+        \\
+        \\
+    , .{typename});
+}
+
+fn genApiContractDef(cg: *CodeGen, api_contract: Node.ApiContractDef) !void {
+    const version = try cg.getAttribute(api_contract.attributes, .contractversion) orelse return;
+    const val = try cg.resolveConstExpr(version.contractversion);
+
+    // TODO: Construct the name once
+    try cg.print("#if !defined(", .{});
+    for (cg.current_namespace.items) |ref| {
+        const lit = cg.intern_pool.get(cg.nodes[ref.toInt()].type).?;
+        for (lit) |c| try cg.print("{c}", .{std.ascii.toUpper(c)});
+        try cg.print("_", .{});
+    }
+    try cg.genName(api_contract.name);
+    try cg.print("_VERSION", .{});
+    try cg.print(")\n", .{});
+
+    try cg.print("#define ", .{});
+    for (cg.current_namespace.items) |ref| {
+        const lit = cg.intern_pool.get(cg.nodes[ref.toInt()].type).?;
+        for (lit) |c| try cg.print("{c}", .{std.ascii.toUpper(c)});
+        try cg.print("_", .{});
+    }
+    try cg.genName(api_contract.name);
+    try cg.print("_VERSION ", .{});
+    try cg.print("0x{x}", .{val.asInt()});
+    try cg.print("\n", .{});
+
+    try cg.print("#endif // defined(", .{});
+    for (cg.current_namespace.items) |ref| {
+        const lit = cg.intern_pool.get(cg.nodes[ref.toInt()].type).?;
+        for (lit) |c| try cg.print("{c}", .{std.ascii.toUpper(c)});
+        try cg.print("_", .{});
+    }
+
+    const lit = cg.intern_pool.get(cg.nodes[api_contract.name.toInt()].type).?;
+    for (lit) |c| try cg.print("{c}", .{std.ascii.toUpper(c)});
+    try cg.print("_VERSION", .{});
+    try cg.print(")\n", .{});
+
+    try cg.print("\n", .{});
+}
+
+fn genNamespaceOpen(cg: *CodeGen) !void {
+    for (cg.current_namespace.items) |ref| {
+        try cg.printIndent(0);
+        try cg.print("namespace ", .{});
+        try cg.genName(ref);
+        try cg.print(" {{\n", .{});
+        cg.indent += 4;
+    }
+}
+fn genNamespaceClose(cg: *CodeGen) !void {
+    for (cg.current_namespace.items) |_| {
+        cg.indent -= 4;
+        try cg.printIndent(0);
+        try cg.print("}}\n", .{});
+    }
+}
+
+fn genNamespace(cg: *CodeGen, namespace: Node.Namespace) !void {
+    for (namespace.qualified_name.start..namespace.qualified_name.end) |i| {
+        cg.current_namespace.append(cg.data[i]) catch return error.CodeGenError;
+    }
+
+    for (namespace.statements.start..namespace.statements.end) |i| {
+        try cg.genNode(cg.data[i]);
+    }
+
+    for (namespace.qualified_name.start..namespace.qualified_name.end) |_| {
+        std.debug.assert(cg.current_namespace.pop() != null);
     }
 }
 
@@ -615,6 +758,19 @@ fn genTypeContext(cg: *CodeGen, node_ref: Node.Ref, context: GenTypeContext) Err
                 try cg.genTypeContext(df.declarator, context);
             },
         },
+        .parameterized_type_arg => |tyarg| {
+            if (tyarg.is_pointer) try cg.print("*", .{});
+            try cg.genType(tyarg.type);
+        },
+        .parameterized_type => |ty| {
+            try cg.genTypeContext(ty.qual_type, context);
+            if (!ty.type_args.empty()) try cg.print("<", .{});
+            for (ty.type_args.start..ty.type_args.end) |i| {
+                try cg.genType(cg.data[i]);
+                if (i + 1 < ty.type_args.end) try cg.print(", ", .{});
+            }
+            if (!ty.type_args.empty()) try cg.print(" >", .{});
+        },
         else => {
             std.debug.print("genType: unsupported node type: {s}\n", .{@tagName(node)});
             return error.UnexpectedNodeType;
@@ -889,6 +1045,12 @@ fn resolveConstExpr(cg: *CodeGen, expr: Node.Ref) Error!ConstVal {
         },
         // TODO: Handle cast properly, need to be able to target a specific type
         .cast => |e| cg.resolveConstExpr(e.expr),
+        .int_version => |v| {
+            var value: usize = v.major;
+            value <<= 16; // TODO: Think the type may not be a u32 but a u16
+            value |= v.minor orelse 0;
+            return .{ .hex_int = @intCast(value) };
+        },
         else => {
             log.err("resolveConstExpr: unsupported node {s}", .{@tagName(node)});
             return error.CodeGenError;
@@ -1687,7 +1849,7 @@ fn genLibrary(cg: *CodeGen, library: Node.LibraryDef) Error!void {
     }
 
     for (library.import_statements.start..library.import_statements.end) |index| {
-        try cg.genNode(cg.data[index], 0);
+        try cg.genNode(cg.data[index]);
     }
 
     try cg.print(

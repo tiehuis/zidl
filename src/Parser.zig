@@ -174,6 +174,7 @@ fn storeForwardDecl(p: *Parser, node: Node, node_index: Node.Ref) Error!void {
     switch (node) {
         .interface,
         .coclass_def,
+        .runtime_class_def,
         => try p.forward_decl_table.append(node_index),
         else => {},
     }
